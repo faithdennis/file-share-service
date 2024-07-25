@@ -3,6 +3,44 @@ package client_test
 // You MUST NOT change these default imports.  ANY additional imports may
 // break the autograder and everyone will be sad.
 
+/* Brainstorm: How to test HMAC */
+/* Testing Errors:
+InitUser
+- A user with the same username exists.
+- An empty username is provided.
+GetUser
+- There is no initialized user for the given username.
+- The user credentials are invalid.
+The User struct cannot be obtained due to malicious action, or the integrity of the user struct has been compromised.
+
+User.LoadFile
+- Error if filename does not exist in personal file
+- Error if file has been modified **integrity flag**
+- Error if file has been accessed by someone like the database adversary
+
+User.StoreFile
+- File is overwritten if it exists and others see the change
+
+AppendToFile
+- The given filename does not exist in the personal file namespace of the caller.
+- Appending the file cannot succeed due to any other malicious action.
+
+CreateInvitation
+ - The given filename does not exist in the personal file namespace of the caller.
+ - The given recipientUsername does not exist.
+ - Sharing cannot be completed due to any malicious action.
+
+AcceptInvitation
+- The user already has a file with the chosen filename in their personal file namespace.
+- Something about the invitationPtr is wrong (e.g. the value at that UUID on Datastore is corrupt or missing, or the user cannot verify that invitationPtr was provided by senderUsername).
+- The invitation is no longer valid due to revocation.
+
+RevokeAccess
+- The given filename does not exist in the caller’s personal file namespace.
+- The given filename is not currently shared with recipientUsername.
+- Revocation cannot be completed due to malicious action.
+*/
+
 import (
 	// Some imports use an underscore to prevent the compiler from complaining
 	// about unused imports.
