@@ -12,18 +12,18 @@ To test your implementation, run `go test -v` inside of the `client_test` direct
 
 Fill in this section with the student IDs of all the members in your project group.
 
-Partner 1 Name:
+Partner 1 Name: Chaarvi Goel
 
-Partner 1 SID:
+Partner 1 SID: 3038457411
 
-Partner 1 Email:
+Partner 1 Email: chaarvigoel@berkeley.edu
 
-Partner 2 Name (if applicable):
+Partner 2 Name (if applicable): Faith Dennis
 
-Partner 2 SID (if applicable):
+Partner 2 SID (if applicable): 3032760733
 
-Partner 2 Email (if applicable):
+Partner 2 Email (if applicable): f.albao@berkeley.edu
 
 Also add a link to this repo below (should start with https://github.com/cs161-students/).
 
-Link to this Github repo:
+Link to this Github repo: https://github.com/cs161-students/su24-proj2-2am/
