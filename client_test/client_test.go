@@ -91,7 +91,7 @@ var _ = Describe("Client Tests", func() {
 	var bob *client.User
 	var charles *client.User
 	// var doris *client.User
-	// var eve *client.User
+	var eve *client.User
 	// var frank *client.User
 	// var grace *client.User
 	// var horace *client.User
@@ -166,7 +166,7 @@ var _ = Describe("Client Tests", func() {
 
 		Specify("InitUser Test: Testing empty string Username returns error", func() {
 			userlib.DebugMsg("Initializing user Alice.")
-			empty, err = client.InitUser(emptyString, defaultPassword)
+			eve, err = client.InitUser(emptyString, defaultPassword)
 			Expect(err).ToNot(BeNil())
 		})
 
