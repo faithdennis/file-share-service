@@ -91,7 +91,7 @@ var _ = Describe("Client Tests", func() {
 	var bob *client.User
 	var charles *client.User
 	// var doris *client.User
-	var eve *client.User
+	//var eve *client.User
 	// var frank *client.User
 	// var grace *client.User
 	// var horace *client.User
@@ -136,17 +136,12 @@ var _ = Describe("Client Tests", func() {
 			db2 := userlib.DatastoreGetMap()
 			for key := range db2 {
 				if _, found := db1[key]; !found {
-					diff := key
+					diff = key
 				}
 			}
 
-			userlib.DatastoreSet(diff, maliciousByte)
-
 			userlib.DebugMsg("Tampering with user Alice.")
-
-			// DataStoreGetMap returns key-value map, DataStore.Set to change a value at a certain UUID, call map before and after files added to find out UUID that has been added
-
-			userlib.DebugMsg("Getting user Alice.")
+			userlib.DatastoreSet(diff, maliciousByte)
 			aliceLaptop, err = client.GetUser("alice", defaultPassword)
 			Expect(err).ToNot(BeNil())
 		})
@@ -155,7 +150,6 @@ var _ = Describe("Client Tests", func() {
 			userlib.DebugMsg("Initializing user Alice.")
 
 		})
-
 		Specify("Integrity Test: Testing User.LoadFile", func() {
 			userlib.DebugMsg("Initializing user Alice.")
 
@@ -166,7 +160,7 @@ var _ = Describe("Client Tests", func() {
 
 		Specify("InitUser Test: Testing empty string Username returns error", func() {
 			userlib.DebugMsg("Initializing user Alice.")
-			eve, err = client.InitUser(emptyString, defaultPassword)
+			//eve, err = client.InitUser(emptyString, defaultPassword)
 			Expect(err).ToNot(BeNil())
 		})
 
