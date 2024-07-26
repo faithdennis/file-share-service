@@ -91,7 +91,7 @@ var _ = Describe("Client Tests", func() {
 	var bob *client.User
 	var charles *client.User
 	// var doris *client.User
-	//var eve *client.User
+	// var eve *client.User
 	// var frank *client.User
 	// var grace *client.User
 	// var horace *client.User
@@ -146,12 +146,33 @@ var _ = Describe("Client Tests", func() {
 			Expect(err).ToNot(BeNil())
 		})
 
-		Specify("Integrity Test: Testing User.StoreFile", func() {
-			userlib.DebugMsg("Initializing user Alice.")
-
-		})
 		Specify("Integrity Test: Testing User.LoadFile", func() {
+			var diff userlib.UUID
+
 			userlib.DebugMsg("Initializing user Alice.")
+			alice, err = client.InitUser("alice", defaultPassword)
+			Expect(err).To(BeNil())
+
+			db1 := userlib.DatastoreGetMap()
+
+			userlib.DebugMsg("Storing file data: %s", contentOne)
+			err = alice.StoreFile(aliceFile, []byte(contentOne))
+			Expect(err).To(BeNil())
+
+			userlib.DebugMsg("Get newly created UUID.")
+			db2 := userlib.DatastoreGetMap()
+			for key := range db2 {
+				if _, found := db1[key]; !found {
+					diff = key
+				}
+			}
+
+			userlib.DebugMsg("Tampering with Alice's File.")
+			userlib.DatastoreSet(diff, maliciousByte)
+
+			data, err := alice.LoadFile(aliceFile)
+			Expect(err).ToNot(BeNil())
+			Expect(data).ToNot(Equal([]byte(contentOne)))
 
 		})
 	})
@@ -160,7 +181,7 @@ var _ = Describe("Client Tests", func() {
 
 		Specify("InitUser Test: Testing empty string Username returns error", func() {
 			userlib.DebugMsg("Initializing user Alice.")
-			//eve, err = client.InitUser(emptyString, defaultPassword)
+			alice, err = client.InitUser(emptyString, defaultPassword)
 			Expect(err).ToNot(BeNil())
 		})
 
@@ -203,6 +224,7 @@ var _ = Describe("Client Tests", func() {
 			alice, err = client.GetUser("alic", "epassword")
 			Expect(err).ToNot(BeNil())
 		})
+
 	})
 
 	//THEIR TESTS
