@@ -124,6 +124,8 @@ var _ = Describe("Client Tests", func() {
 		userlib.KeystoreClear()
 	})
 
+	// Todo: - integrity check for invitations, append to file
+
 	Describe("Integrity Tests", func() {
 		Specify("Integrity Test: Testing InitUser/GetUser", func() {
 			var diff userlib.UUID
