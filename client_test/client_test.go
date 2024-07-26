@@ -3,44 +3,6 @@ package client_test
 // You MUST NOT change these default imports.  ANY additional imports may
 // break the autograder and everyone will be sad.
 
-/* Brainstorm: How to test HMAC */
-/* Testing Errors:
-InitUser
-- A user with the same username exists.
-- An empty username is provided.
-GetUser
-- There is no initialized user for the given username.
-- The user credentials are invalid.
-The User struct cannot be obtained due to malicious action, or the integrity of the user struct has been compromised.
-
-User.LoadFile
-- Error if filename does not exist in personal file
-- Error if file has been modified **integrity flag**
-- Error if file has been accessed by someone like the database adversary
-
-User.StoreFile
-- File is overwritten if it exists and others see the change
-
-AppendToFile
-- The given filename does not exist in the personal file namespace of the caller.
-- Appending the file cannot succeed due to any other malicious action.
-
-CreateInvitation
- - The given filename does not exist in the personal file namespace of the caller.
- - The given recipientUsername does not exist.
- - Sharing cannot be completed due to any malicious action.
-
-AcceptInvitation
-- The user already has a file with the chosen filename in their personal file namespace.
-- Something about the invitationPtr is wrong (e.g. the value at that UUID on Datastore is corrupt or missing, or the user cannot verify that invitationPtr was provided by senderUsername).
-- The invitation is no longer valid due to revocation.
-
-RevokeAccess
-- The given filename does not exist in the caller’s personal file namespace.
-- The given filename is not currently shared with recipientUsername.
-- Revocation cannot be completed due to malicious action.
-*/
-
 import (
 	// Some imports use an underscore to prevent the compiler from complaining
 	// about unused imports.
@@ -192,8 +154,8 @@ var _ = Describe("Client Tests", func() {
 			alice, err = client.InitUser("alice", defaultPassword)
 			Expect(err).To(BeNil())
 
-			userlib.DebugMsg("Initializing user Alic.")
-			alice, err = client.InitUser("alic", "epassword")
+			userlib.DebugMsg("Initializing user Alice a second time.")
+			alice, err = client.InitUser("alice", defaultPassword)
 			Expect(err).ToNot(BeNil())
 		})
 
@@ -203,7 +165,7 @@ var _ = Describe("Client Tests", func() {
 			Expect(err).To(BeNil())
 
 			userlib.DebugMsg("Initializing user Alic.")
-			alice, err = client.InitUser("alic", "epassword")
+			aliceLaptop, err = client.InitUser("alic", "epassword")
 			Expect(err).To(BeNil())
 		})
 
@@ -213,18 +175,90 @@ var _ = Describe("Client Tests", func() {
 			Expect(err).To(BeNil())
 
 			userlib.DebugMsg("Getting user Alic.")
-			alice, err = client.GetUser("alic", "epassword")
+			aliceLaptop, err = client.GetUser("alic", "epassword")
 			Expect(err).ToNot(BeNil())
 		})
 
-		Specify("GetUser Test: Testing uninitialized similar user returns error", func() {
+		Specify("GetUser Test: Testing invalid credentials returns error", func() {
 			userlib.DebugMsg("Initializing user Alice.")
 			alice, err = client.InitUser("alice", defaultPassword)
 			Expect(err).To(BeNil())
 
 			userlib.DebugMsg("Getting user Alic.")
-			alice, err = client.GetUser("alic", "epassword")
+			alice, err = client.GetUser("alice", emptyString)
 			Expect(err).ToNot(BeNil())
+		})
+
+		Specify("LoadFile Test: Testing uninitialized filename returns error", func() {
+			userlib.DebugMsg("Initializing Alice.")
+			alice, err = client.InitUser("alice", defaultPassword)
+
+			userlib.DebugMsg("Loading file.")
+			data, err := alice.LoadFile(aliceFile)
+			Expect(err).ToNot(BeNil())
+			Expect(data).To(BeNil())
+		})
+
+		Specify("AppendToFile Test: Testing uninitialized filename returns error", func() {
+			userlib.DebugMsg("Initializing Alice.")
+			alice, err = client.InitUser("alice", defaultPassword)
+
+			userlib.DebugMsg("Appending to file.")
+			err := alice.AppendToFile(aliceFile, maliciousByte)
+			Expect(err).ToNot(BeNil())
+		})
+
+		Specify("CreateInvitation: Testing unitialized filename returns error", func() {
+			userlib.DebugMsg("Initializing Alice.")
+			alice, err = client.InitUser("alice", defaultPassword)
+			Expect(err).To(BeNil())
+
+			userlib.DebugMsg("Initializing Bob.")
+			bob, err = client.InitUser("bob", defaultPassword)
+			Expect(err).To(BeNil())
+
+			userlib.DebugMsg("Creating invite.")
+			data, err := alice.CreateInvitation(aliceFile, "bob")
+			Expect(err).ToNot(BeNil())
+			Expect(data).To(BeNil())
+		})
+
+		Specify("CreateInvitation: Testing uninitialized user returns error", func() {
+			userlib.DebugMsg("Initializing Alice.")
+			alice, err = client.InitUser("alice", defaultPassword)
+			Expect(err).To(BeNil())
+
+			userlib.DebugMsg("Storing file data: %s", contentOne)
+			err = alice.StoreFile(aliceFile, []byte(contentOne))
+			Expect(err).To(BeNil())
+
+			userlib.DebugMsg("Creating invite.")
+			data, err := alice.CreateInvitation(aliceFile, "bob")
+			Expect(err).ToNot(BeNil())
+			Expect(data).To(BeNil())
+		})
+
+		Specify("AcceptInvitation: Testing file already exists returns error", func() {
+			userlib.DebugMsg("Initializing Alice.")
+			alice, err = client.InitUser("alice", defaultPassword)
+			Expect(err).To(BeNil())
+
+			userlib.DebugMsg("Storing file data: %s", contentOne)
+			err = alice.StoreFile(aliceFile, []byte(contentOne))
+			Expect(err).To(BeNil())
+
+			userlib.DebugMsg("Initializing Bob.")
+			bob, err = client.InitUser("bob", defaultPassword)
+			Expect(err).To(BeNil())
+
+			userlib.DebugMsg("Storing file data: %s", contentOne)
+			err = bob.StoreFile(aliceFile, []byte(contentOne))
+			Expect(err).To(BeNil())
+
+			userlib.DebugMsg("Creating invite.")
+			data, err := alice.CreateInvitation(aliceFile, "bob")
+			Expect(err).ToNot(BeNil())
+			Expect(data).To(BeNil())
 		})
 
 	})
