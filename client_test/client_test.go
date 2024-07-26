@@ -101,6 +101,7 @@ var _ = Describe("Client Tests", func() {
 	var alicePhone *client.User
 	var aliceLaptop *client.User
 	var aliceDesktop *client.User
+	var maliciousByte = []byte("tamper")
 
 	var err error
 
@@ -123,6 +124,94 @@ var _ = Describe("Client Tests", func() {
 		userlib.KeystoreClear()
 	})
 
+	Describe("Integrity Tests", func() {
+		Specify("Integrity Test: Testing InitUser/GetUser", func() {
+			var diff userlib.UUID
+			db1 := userlib.DatastoreGetMap()
+			userlib.DebugMsg("Initializing user Alice.")
+			alice, err = client.InitUser("alice", defaultPassword)
+			Expect(err).To(BeNil())
+
+			userlib.DebugMsg("Get newly created UUID.")
+			db2 := userlib.DatastoreGetMap()
+			for key := range db2 {
+				if _, found := db1[key]; !found {
+					diff := key
+				}
+			}
+
+			userlib.DatastoreSet(diff, maliciousByte)
+
+			userlib.DebugMsg("Tampering with user Alice.")
+
+			// DataStoreGetMap returns key-value map, DataStore.Set to change a value at a certain UUID, call map before and after files added to find out UUID that has been added
+
+			userlib.DebugMsg("Getting user Alice.")
+			aliceLaptop, err = client.GetUser("alice", defaultPassword)
+			Expect(err).ToNot(BeNil())
+		})
+
+		Specify("Integrity Test: Testing User.StoreFile", func() {
+			userlib.DebugMsg("Initializing user Alice.")
+
+		})
+
+		Specify("Integrity Test: Testing User.LoadFile", func() {
+			userlib.DebugMsg("Initializing user Alice.")
+
+		})
+	})
+
+	Describe("All Other Error Tests", func() {
+
+		Specify("InitUser Test: Testing empty string Username returns error", func() {
+			userlib.DebugMsg("Initializing user Alice.")
+			empty, err = client.InitUser(emptyString, defaultPassword)
+			Expect(err).ToNot(BeNil())
+		})
+
+		Specify("InitUser Test: Testing same Username/Password returns error", func() {
+			userlib.DebugMsg("Initializing user Alice.")
+			alice, err = client.InitUser("alice", defaultPassword)
+			Expect(err).To(BeNil())
+
+			userlib.DebugMsg("Initializing user Alic.")
+			alice, err = client.InitUser("alic", "epassword")
+			Expect(err).ToNot(BeNil())
+		})
+
+		Specify("InitUser Test: Testing similar Username/Password does not return error", func() {
+			userlib.DebugMsg("Initializing user Alice.")
+			alice, err = client.InitUser("alice", defaultPassword)
+			Expect(err).To(BeNil())
+
+			userlib.DebugMsg("Initializing user Alic.")
+			alice, err = client.InitUser("alic", "epassword")
+			Expect(err).To(BeNil())
+		})
+
+		Specify("GetUser Test: Testing uninitialized similar user returns error", func() {
+			userlib.DebugMsg("Initializing user Alice.")
+			alice, err = client.InitUser("alice", defaultPassword)
+			Expect(err).To(BeNil())
+
+			userlib.DebugMsg("Getting user Alic.")
+			alice, err = client.GetUser("alic", "epassword")
+			Expect(err).ToNot(BeNil())
+		})
+
+		Specify("GetUser Test: Testing uninitialized similar user returns error", func() {
+			userlib.DebugMsg("Initializing user Alice.")
+			alice, err = client.InitUser("alice", defaultPassword)
+			Expect(err).To(BeNil())
+
+			userlib.DebugMsg("Getting user Alic.")
+			alice, err = client.GetUser("alic", "epassword")
+			Expect(err).ToNot(BeNil())
+		})
+	})
+
+	//THEIR TESTS
 	Describe("Basic Tests", func() {
 
 		Specify("Basic Test: Testing InitUser/GetUser on a single user.", func() {
