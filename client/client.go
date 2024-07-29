@@ -135,7 +135,7 @@ type Access struct {
 }
 
 type InvitiationMeta struct {
-	//
+	Invitations map[string]userlib.UUID
 }
 
 type Invitation struct {
@@ -213,4 +213,20 @@ func (userdata *User) RevokeAccess(filename string, recipientUsername string) er
 	return nil
 }
 
-func EncryptAndMac(key1 []byte, key2 []byte) (msg, tag)
+// Helper Functions
+func EncryptAndMac(txt string, key1, key2 []byte) (msg, tag []byte) {
+	// encrypt
+	rndbytes []byte = userlib.RandomBytes(16)
+	msg = userlib.SymEnc(key1, rndbytes, json.Marshal(txt))
+
+	// mac
+	tag = HMACEval(key2, msg)
+
+	return msg, tag
+}
+
+func GetTwoHashKDFKeys(Sourcekey []byte, purpose1, purpose2 string) (key1, key2 []byte) {
+	// TODO
+}
+
+
