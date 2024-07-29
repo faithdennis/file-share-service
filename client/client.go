@@ -109,7 +109,10 @@ func someUsefulThings() {
 // A Go struct is like a Python or Java class - it can have attributes
 // (e.g. like the Username attribute) and methods (e.g. like the StoreFile method below).
 type User struct {
-	Username string
+	Username  string
+	Sourcekey []byte
+	RSAkey    userlib.PKEDecKey
+	Sigkey    userlib.DSSignKey
 
 	// You can add other attributes here if you want! But note that in order for attributes to
 	// be included when this struct is serialized to/from JSON, they must be capitalized.
@@ -117,6 +120,40 @@ type User struct {
 	// this struct's methods, but you DON'T want that value to be included in the serialized value
 	// of this struct that's stored in datastore, then you can use a "private" variable (e.g. one that
 	// begins with a lowercase letter).
+}
+
+type Owner struct {
+	Meta        userlib.UUID
+	Invitations userlib.UUID
+	// keys ?
+}
+
+type Access struct {
+	Invitation     userlib.UUID
+	MetaEncryptkey []byte
+	MetaMACkey     []byte
+}
+
+type InvitiationMeta struct {
+	//
+}
+
+type Invitation struct {
+	Meta           userlib.UUID
+	MetaEncryptkey []byte
+	MetaMACkey     []byte
+}
+
+type Meta struct {
+	Start          userlib.UUID
+	End            userlib.UUID
+	FileEncryptkey []byte
+	FileMACkey     []byte
+}
+
+type File struct {
+	Contents string
+	Next     userlib.UUID // is there risk to using same key?
 }
 
 // NOTE: The following methods have toy (insecure!) implementations.
@@ -175,3 +212,5 @@ func (userdata *User) AcceptInvitation(senderUsername string, invitationPtr uuid
 func (userdata *User) RevokeAccess(filename string, recipientUsername string) error {
 	return nil
 }
+
+func EncryptAndMac(key1 []byte, key2 []byte) (msg, tag)
