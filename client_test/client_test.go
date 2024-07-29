@@ -149,6 +149,12 @@ var _ = Describe("Client Tests", func() {
 			Expect(err).ToNot(BeNil())
 		})
 
+		Specify("InitUser Test: Testing password with only spaces returns error", func() {
+			userlib.DebugMsg("Initializing user with a password that is only spaces.")
+			alice, err = client.InitUser("alice", "     ")
+			Expect(err).ToNot(BeNil())
+		})
+
 		Specify("InitUser Test: Testing same Username/Password returns error", func() {
 			userlib.DebugMsg("Initializing user Alice.")
 			alice, err = client.InitUser("alice", defaultPassword)
@@ -167,6 +173,33 @@ var _ = Describe("Client Tests", func() {
 			userlib.DebugMsg("Initializing user Alic.")
 			aliceLaptop, err = client.InitUser("alic", "epassword")
 			Expect(err).To(BeNil())
+		})
+
+		Specify("InitUser Test: Testing initializing user with existing username and different password returns error", func() {
+			userlib.DebugMsg("Initializing user Alice.")
+			alice, err = client.InitUser("alice", defaultPassword)
+			Expect(err).To(BeNil())
+
+			userlib.DebugMsg("Trying to initialize user Alice with a different password.")
+			alice, err = client.InitUser("alice", "newPassword")
+			Expect(err).ToNot(BeNil())
+		})
+
+		Specify("InitUser Test: InitUser but all Caps", func() {
+			userlib.DebugMsg("Initializing user Alice.")
+			alice, err = client.InitUser("alice", defaultPassword)
+			Expect(err).To(BeNil())
+
+			userlib.DebugMsg("Initializing user ALICE with different case.")
+			aliceUpper, err := client.InitUser("ALICE", defaultPassword)
+			Expect(err).To(BeNil())
+			Expect(aliceUpper).ToNot(Equal(alice))
+		})
+
+		Specify("InitUser Test: Testing empty username and empty password returns error", func() {
+			userlib.DebugMsg("Initializing user with empty username and password.")
+			alice, err = client.InitUser("", "")
+			Expect(err).ToNot(BeNil())
 		})
 
 		Specify("GetUser Test: Testing uninitialized similar user returns error", func() {
@@ -189,6 +222,70 @@ var _ = Describe("Client Tests", func() {
 			Expect(err).ToNot(BeNil())
 		})
 
+		Specify("GetUser Test: empty username returns error", func() {
+			userlib.DebugMsg("Initializing user Alice.")
+			alice, err = client.InitUser("alice", defaultPassword)
+			Expect(err).To(BeNil())
+
+			userlib.DebugMsg("Retrieving user with empty username.")
+			aliceRetrieved, err := client.GetUser("", defaultPassword)
+			Expect(err).ToNot(BeNil())
+			Expect(aliceRetrieved).To(BeNil())
+		})
+
+		Specify("GetUser Test: empty password returns error", func() {
+			userlib.DebugMsg("Initializing user Alice.")
+			alice, err = client.InitUser("alice", defaultPassword)
+			Expect(err).To(BeNil())
+
+			userlib.DebugMsg("Retrieving user Alice with empty password.")
+			aliceRetrieved, err := client.GetUser("alice", "")
+			Expect(err).ToNot(BeNil())
+			Expect(aliceRetrieved).To(BeNil())
+		})
+
+		Specify("StoreFile Test: Storing file with empty content", func() {
+			userlib.DebugMsg("Initializing user Alice.")
+			alice, err = client.InitUser("alice", defaultPassword)
+			Expect(err).To(BeNil())
+
+			err = alice.StoreFile(aliceFile, []byte{})
+			Expect(err).To(BeNil())
+
+			data, err := alice.LoadFile(aliceFile)
+			Expect(err).To(BeNil())
+			Expect(data).To(Equal([]byte{}))
+		})
+
+		Specify("StoreFile Test: Overwrite file data", func() {
+			userlib.DebugMsg("Initializing user Alice.")
+			alice, err = client.InitUser("alice", defaultPassword)
+			Expect(err).To(BeNil())
+
+			userlib.DebugMsg("Storing file data: %s", contentOne)
+			err = alice.StoreFile("file2.txt", []byte(contentOne))
+			Expect(err).To(BeNil())
+
+			userlib.DebugMsg("Overwriting file data: %s", contentTwo)
+			err = alice.StoreFile("file2.txt", []byte(contentTwo))
+			Expect(err).To(BeNil())
+
+			userlib.DebugMsg("Loading file file2.txt")
+			data, err := alice.LoadFile("file2.txt")
+			Expect(err).To(BeNil())
+			Expect(data).To(Equal([]byte(contentTwo)))
+		})
+
+		Specify("StoreFile Test: Attempt to store file with empty filename", func() {
+			userlib.DebugMsg("Initializing user Alice.")
+			alice, err = client.InitUser("alice", defaultPassword)
+			Expect(err).To(BeNil())
+
+			userlib.DebugMsg("Attempting to store file with empty filename.")
+			err = alice.StoreFile(emptyString, []byte(contentOne))
+			Expect(err).To(BeNil())
+		})
+
 		Specify("LoadFile Test: Testing uninitialized filename returns error", func() {
 			userlib.DebugMsg("Initializing Alice.")
 			alice, err = client.InitUser("alice", defaultPassword)
@@ -199,6 +296,69 @@ var _ = Describe("Client Tests", func() {
 			Expect(data).To(BeNil())
 		})
 
+		Specify("LoadFile Test: Load a file that was overwritten", func() {
+			userlib.DebugMsg("Initializing user Alice.")
+			alice, err = client.InitUser("alice", defaultPassword)
+			Expect(err).To(BeNil())
+
+			userlib.DebugMsg("Storing file data: %s", contentOne)
+			err = alice.StoreFile("file2.txt", []byte(contentOne))
+			Expect(err).To(BeNil())
+
+			userlib.DebugMsg("Overwriting file data: %s", contentTwo)
+			err = alice.StoreFile("file2.txt", []byte(contentTwo))
+			Expect(err).To(BeNil())
+
+			userlib.DebugMsg("Loading file file2.txt")
+			_, err := alice.LoadFile("file2.txt")
+			Expect(err).To(BeNil())
+		})
+
+		Specify("LoadFile Test: Load file with special characters in filename", func() {
+			userlib.DebugMsg("Initializing user Alice.")
+			alice, err = client.InitUser("alice", defaultPassword)
+			Expect(err).To(BeNil())
+
+			specialFile := "file_with_!@#$%^&*()_+.txt"
+
+			userlib.DebugMsg("Storing file data with special characters in filename: %s", specialFile)
+			err = alice.StoreFile(specialFile, []byte(contentOne))
+			Expect(err).To(BeNil())
+
+			userlib.DebugMsg("Loading file %s", specialFile)
+			_, err := alice.LoadFile(specialFile)
+			Expect(err).To(BeNil())
+
+		})
+
+		Specify("LoadFile Test: Load a file with empty filename", func() {
+			userlib.DebugMsg("Initializing user Alice.")
+			alice, err = client.InitUser("alice", defaultPassword)
+			Expect(err).To(BeNil())
+
+			userlib.DebugMsg("Storing file with empty filename.")
+			err = alice.StoreFile(emptyString, []byte("Hello, World!"))
+			Expect(err).To(BeNil())
+
+			userlib.DebugMsg("Loading file with empty filename")
+			_, err = alice.LoadFile(emptyString)
+			Expect(err).To(BeNil())
+		})
+
+		Specify("LoadFile Test: Load file with empty content", func() {
+			userlib.DebugMsg("Initializing user Alice.")
+			alice, err = client.InitUser("alice", defaultPassword)
+			Expect(err).To(BeNil())
+
+			userlib.DebugMsg("Storing file with empty content.")
+			err = alice.StoreFile("file4.txt", []byte(emptyString))
+			Expect(err).To(BeNil())
+
+			userlib.DebugMsg("Loading file file4.txt")
+			_, err = alice.LoadFile("file4.txt")
+			Expect(err).To(BeNil())
+		})
+
 		Specify("AppendToFile Test: Testing uninitialized filename returns error", func() {
 			userlib.DebugMsg("Initializing Alice.")
 			alice, err = client.InitUser("alice", defaultPassword)
@@ -206,6 +366,50 @@ var _ = Describe("Client Tests", func() {
 			userlib.DebugMsg("Appending to file.")
 			err := alice.AppendToFile(aliceFile, maliciousByte)
 			Expect(err).ToNot(BeNil())
+		})
+
+		Specify("AppendToFile Test: Append data with special characters in filename", func() {
+			userlib.DebugMsg("Initializing user Alice.")
+			alice, err = client.InitUser("alice", defaultPassword)
+			Expect(err).To(BeNil())
+
+			specialFile := "file_with_!@#$%^&*()_+.txt"
+
+			userlib.DebugMsg("Storing initial file data.")
+			err = alice.StoreFile(specialFile, []byte("Initial Data"))
+			Expect(err).To(BeNil())
+
+			userlib.DebugMsg("Appending to file %s", specialFile)
+			err = alice.AppendToFile(specialFile, []byte(" Appended Data"))
+			Expect(err).To(BeNil())
+		})
+
+		Specify("AppendToFile Test: Append with empty content", func() {
+			userlib.DebugMsg("Initializing user Alice.")
+			alice, err = client.InitUser("alice", defaultPassword)
+			Expect(err).To(BeNil())
+
+			userlib.DebugMsg("Storing file with initial content.")
+			err = alice.StoreFile("file3.txt", []byte("Initial Content"))
+			Expect(err).To(BeNil())
+
+			userlib.DebugMsg("Appending empty content to file file3.txt")
+			err = alice.AppendToFile("file3.txt", []byte(emptyString))
+			Expect(err).To(BeNil())
+		})
+
+		Specify("AppendToFile Test: Append to file with empty filename", func() {
+			userlib.DebugMsg("Initializing user Alice.")
+			alice, err = client.InitUser("alice", defaultPassword)
+			Expect(err).To(BeNil())
+
+			userlib.DebugMsg("Storing file with initial content.")
+			err = alice.StoreFile(emptyString, []byte("Initial Content"))
+			Expect(err).To(BeNil())
+
+			userlib.DebugMsg("Appending to file with empty filename")
+			err = alice.AppendToFile(emptyString, []byte(" Appended Data"))
+			Expect(err).To(BeNil())
 		})
 
 		Specify("CreateInvitation: Testing unitialized filename returns error", func() {
@@ -238,6 +442,21 @@ var _ = Describe("Client Tests", func() {
 			Expect(data).To(BeNil())
 		})
 
+		Specify("CreateInvitation Test: Share with self", func() {
+			userlib.DebugMsg("Initializing user Alice.")
+			alice, err = client.InitUser("alice", defaultPassword)
+			Expect(err).To(BeNil())
+
+			userlib.DebugMsg("Storing file data: %s", contentOne)
+			err = alice.StoreFile(aliceFile, []byte(contentOne))
+			Expect(err).To(BeNil())
+
+			userlib.DebugMsg("Creating invitation for self.")
+			invitationID, err := alice.CreateInvitation(aliceFile, "alice")
+			Expect(err).ToNot(BeNil())
+			Expect(invitationID).To(BeNil())
+		})
+
 		Specify("CreateInvitation: Testing user does not have access to file returns error", func() {
 			userlib.DebugMsg("Initializing Alice.")
 			alice, err = client.InitUser("alice", defaultPassword)
@@ -259,6 +478,44 @@ var _ = Describe("Client Tests", func() {
 			data, err := bob.CreateInvitation(aliceFile, "charles")
 			Expect(err).ToNot(BeNil())
 			Expect(data).To(BeNil())
+		})
+
+		Specify("CreateInvitation Test: File name already exists for recipient", func() {
+			userlib.DebugMsg("Initializing user Alice.")
+			alice, err = client.InitUser("alice", defaultPassword)
+			Expect(err).To(BeNil())
+
+			userlib.DebugMsg("Initializing user Bob.")
+			bob, err = client.InitUser("bob", defaultPassword)
+			Expect(err).To(BeNil())
+
+			userlib.DebugMsg("Storing file data: %s", contentOne)
+			err = alice.StoreFile(aliceFile, []byte(contentOne))
+			Expect(err).To(BeNil())
+
+			userlib.DebugMsg("Creating invitation for Bob.")
+			invitationID, err := alice.CreateInvitation(aliceFile, "bob")
+			Expect(err).To(BeNil())
+			Expect(invitationID).ToNot(BeNil())
+
+			userlib.DebugMsg("Bob accepts the invitation with a new file name.")
+			err = bob.AcceptInvitation("alice", invitationID, bobFile)
+			Expect(err).To(BeNil())
+		})
+
+		Specify("CreateInvitation Test: Empty file name", func() {
+			userlib.DebugMsg("Initializing user Alice.")
+			alice, err = client.InitUser("alice", defaultPassword)
+			Expect(err).To(BeNil())
+
+			userlib.DebugMsg("Storing file data: %s", contentOne)
+			err = alice.StoreFile(aliceFile, []byte(contentOne))
+			Expect(err).To(BeNil())
+
+			userlib.DebugMsg("Creating invitation with an empty file name.")
+			invitationID, err := alice.CreateInvitation("", "bob")
+			Expect(err).To(BeNil())
+			Expect(invitationID).To(BeNil())
 		})
 
 		Specify("AcceptInvitation: Testing file already exists returns error", func() {
