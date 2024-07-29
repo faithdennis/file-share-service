@@ -214,9 +214,22 @@ func (userdata *User) RevokeAccess(filename string, recipientUsername string) er
 }
 
 // Helper Functions
-func EncryptAndMac(txt string, key1, key2 []byte) (msg, tag []byte) {
+func GetTwoHASHKDFKeys(Sourcekey []byte, purpose1, purpose2 string) (key1, key2 []byte) {
+	key1, err1 := userlib.HashKDF(Sourcekey, []byte(purpose1))
+	key2, err2 := userlib.HashKDF(Sourcekey, []byte(purpose2))
+	if err1 == nil || err2 == nil {
+		return
+	}
+	return key1, key2
+}
+
+func GetTwoRandomKeys() (key1, key2 []byte) {
+	return userlib.RandomBytes(16), userlib.RandomBytes(16)
+}
+
+func EncryptThenMac(txt string, key1, key2 []byte) (msg, tag []byte) {
 	// encrypt
-	rndbytes []byte = userlib.RandomBytes(16)
+	rndbytes := userlib.RandomBytes(16)
 	msg = userlib.SymEnc(key1, rndbytes, json.Marshal(txt))
 
 	// mac
@@ -224,9 +237,3 @@ func EncryptAndMac(txt string, key1, key2 []byte) (msg, tag []byte) {
 
 	return msg, tag
 }
-
-func GetTwoHashKDFKeys(Sourcekey []byte, purpose1, purpose2 string) (key1, key2 []byte) {
-	// TODO
-}
-
-
