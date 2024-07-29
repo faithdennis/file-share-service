@@ -108,6 +108,8 @@ func someUsefulThings() {
 // This is the type definition for the User struct.
 // A Go struct is like a Python or Java class - it can have attributes
 // (e.g. like the Username attribute) and methods (e.g. like the StoreFile method below).
+const LENGTH = 16
+
 type User struct {
 	Username  string
 	Sourcekey []byte
@@ -214,26 +216,89 @@ func (userdata *User) RevokeAccess(filename string, recipientUsername string) er
 }
 
 // Helper Functions
-func GetTwoHASHKDFKeys(Sourcekey []byte, purpose1, purpose2 string) (key1, key2 []byte) {
-	key1, err1 := userlib.HashKDF(Sourcekey, []byte(purpose1))
-	key2, err2 := userlib.HashKDF(Sourcekey, []byte(purpose2))
-	if err1 == nil || err2 == nil {
-		return
+
+// assumes password has sufficient entropy to create non-bruteforceable UUID and sourcekey
+func GetUserUUIDAndSourceKey(user, password string) (UUID userlib.UUID, sourcekey []byte) {
+	// generate uuid
+	userbytes := []byte(user)
+	salt1 := []byte("UUID")
+	UUID, err1 := uuid.FromBytes(userlib.Argon2Key(userbytes, salt1, LENGTH))
+
+	// generate sourcekey
+	passwordbytes := []byte(user + password)
+	salt2 := []byte("sourcekey")
+	sourcekey = userlib.Argon2Key(passwordbytes, salt2, LENGTH)
+
+	// check for error
+	if err1 != nil {
+		print(err1.Error())
 	}
-	return key1, key2
+	return
 }
 
-func GetTwoRandomKeys() (key1, key2 []byte) {
-	return userlib.RandomBytes(16), userlib.RandomBytes(16)
+func GetAsynchKeys() (pk userlib.PKEEncKey, sk userlib.PKEDecKey, signpriv userlib.DSSignKey, signpub userlib.DSVerifyKey) {
+	// generate asymmetric encryption keys
+	pk, sk, err1 := userlib.PKEKeyGen()
+
+	// generate asymmetric signature keys
+	signpriv, signpub, err2 := userlib.DSKeyGen()
+
+	// check for errors
+	if err1 != nil {
+		print(err1.Error())
+	}
+	if err2 != nil {
+		print(err2.Error())
+	}
+	return
+}
+
+// given secure source key and secure purposes should produce secure keys
+func GetTwoHASHKDFKeys(sourcekey []byte, purpose1, purpose2 string) (key1, key2 []byte) {
+	// generate keys
+	key1, err1 := userlib.HashKDF(sourcekey, []byte(purpose1))
+	key2, err2 := userlib.HashKDF(sourcekey, []byte(purpose2))
+
+	// check for errors
+	if err1 != nil {
+		print(err1.Error())
+	}
+	if err2 != nil {
+		print(err2.Error())
+	}
+	return
+}
+
+func GetRandomSourceKey() (key []byte) {
+	// generate random values
+	rand, salt := userlib.RandomBytes(LENGTH), userlib.RandomBytes(LENGTH)
+	key = userlib.Argon2Key(rand, salt, LENGTH)
+	return
+}
+
+func GetTwoRandomSourceKeys() (key1, key2 []byte) {
+	// generate random values
+	rand1, rand2 := userlib.RandomBytes(LENGTH), userlib.RandomBytes(LENGTH)
+	salt1, salt2 := userlib.RandomBytes(LENGTH), userlib.RandomBytes(LENGTH)
+	key1, key2 = userlib.Argon2Key(rand1, salt1, LENGTH), userlib.Argon2Key(rand2, salt2, LENGTH)
+	return
 }
 
 func EncryptThenMac(txt string, key1, key2 []byte) (msg, tag []byte) {
 	// encrypt
-	rndbytes := userlib.RandomBytes(16)
-	msg = userlib.SymEnc(key1, rndbytes, json.Marshal(txt))
+	rndbytes := userlib.RandomBytes(LENGTH)
+	txtbytes, err1 := json.Marshal(txt)
+	msg = userlib.SymEnc(key1, rndbytes, txtbytes)
 
 	// mac
-	tag = HMACEval(key2, msg)
+	tag, err2 := userlib.HMACEval(key2, msg)
 
-	return msg, tag
+	// check for error
+	if err1 != nil {
+		print(err1.Error())
+	}
+	if err2 != nil {
+		print(err2.Error())
+	}
+	return
 }
