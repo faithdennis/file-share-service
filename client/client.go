@@ -267,16 +267,43 @@ func GetUser(username string, password string) (userdataptr *User, err error) {
 }
 
 func (userdata *User) StoreFile(filename string, content []byte) (err error) {
-	storageKey, err := uuid.FromBytes(userlib.Hash([]byte(filename + userdata.Username))[:16])
+	//generate file metadata UUID - helper?
+
+	fileUUID := uuid.New()
+	nextFileUUID := uuid.New()
+	metaUUID := uuid.New()
+
+	// Generate random symmetric keys for file encryption and HMAC
+	//QUESTION: do we want HMAC to be deterministic?
+	fileEncryptKey := userlib.RandomBytes(userlib.AESKeySizeBytes)
+	fileHMACKey := userlib.RandomBytes(userlib.AESKeySizeBytes)
+
+	ciphertext, tag := EncryptThenMac(content, fileEncryptKey, fileHMACKey)
+	fileData, err := GenerateUUIDVal(ciphertext, tag)
 	if err != nil {
-		return err
+		return errors.New("failed to generate file data for storage")
 	}
-	contentBytes, err := json.Marshal(content)
+	userlib.DatastoreSet(fileUUID, fileData)
+
+	// Construct the metadata (UUIDs and keys)
+	fileMeta := Meta{
+		Start:     fileUUID,
+		End:       nextFileUUID,
+		Sourcekey: append(fileEncryptKey, fileHMACKey...),
+	}
+
+	// Encrypt the metadata and create an HMAC tag
+	metaCiphertext, metaTag := EncryptThenMac(fileMeta, userlib.RandomBytes(userlib.AESKeySizeBytes), userlib.RandomBytes(userlib.AESKeySizeBytes))
+
+	// Store the encrypted metadata and the HMAC tag in the datastore
+	metaData, err := GenerateUUIDVal(metaCiphertext, metaTag)
 	if err != nil {
-		return err
+		return errors.New("failed to generate metadata for storage")
 	}
-	userlib.DatastoreSet(storageKey, contentBytes)
-	return
+	userlib.DatastoreSet(metaUUID, metaData)
+	//todo: access struct?
+
+	return nil
 }
 
 func (userdata *User) AppendToFile(filename string, content []byte) error {
