@@ -168,7 +168,7 @@ func InitUser(username string, password string) (userdataptr *User, err error) {
 	}
 
 	// generate UUID
-	userUUID := GetUserUUID(username, password)
+	userUUID, err := GetUserUUID(username, password)
 
 	// error check: check if username already exists
 	_, ok := userlib.DatastoreGet(userUUID)
@@ -180,8 +180,14 @@ func InitUser(username string, password string) (userdataptr *User, err error) {
 	sourceKey := GetSourceKey(username, password)
 
 	// generate asynch and symmetric keys
-	RSAPublicKey, RSAPrivateKey, DSSignKey, DSVerifyKey := GetAsynchKeys()
-	encryptKey, hmacKey := GetTwoHASHKDFKeys(sourceKey, "encrypt", "mac")
+	RSAPublicKey, RSAPrivateKey, DSSignKey, DSVerifyKey, err := GetAsynchKeys()
+	if err != nil {
+		return nil, errors.New("GetAsynchKeys error")
+	}
+	encryptKey, hmacKey, err := GetTwoHASHKDFKeys(sourceKey, "encrypt", "mac")
+	if err != nil {
+		return nil, errors.New("GetTwoHASHKDFKeys error")
+	}
 
 	// put public values into keystore
 	userlib.KeystoreSet(username+" public key", RSAPublicKey)
@@ -200,7 +206,10 @@ func InitUser(username string, password string) (userdataptr *User, err error) {
 	msg, tag := EncryptThenMac(userdata, encryptKey, hmacKey)
 
 	// generate value for datastore and store
-	encryptedUserdata := GenerateUUIDVal(msg, tag)
+	encryptedUserdata, err := GenerateUUIDVal(msg, tag)
+	if err != nil {
+		return nil, errors.New("GenerateUUIDVal error")
+	}
 	userlib.DatastoreSet(userUUID, encryptedUserdata)
 	return userdata, nil
 }
@@ -213,26 +222,48 @@ func GetUser(username string, password string) (userdataptr *User, err error) {
 	}
 
 	// generate UUID
-	userUUID := GetUserUUID(username, password)
-
+	userUUID, err := GetUserUUID(username, password)
+	if err != nil {
+		return nil, errors.New("GetUserUUID error")
+	}
 	// error check: repeat username
 	encryptedUserdata, ok := userlib.DatastoreGet(userUUID)
 	if !ok {
 		return nil, errors.New("username does not exist")
 	}
 
-	//unmarshall the data
-	// separate tag + mac
-	// check tag (this can also be a password check)
-	// unmarshall message
-	// decrypt message
-	// return decrypted data
+	// unpack data into msg and tag
+	msg, tag, err := UnpackValue(encryptedUserdata)
+	if err != nil {
+		return nil, errors.New("failed to unpack user data")
+	}
 
+	// Generate the source key, encryption key, and HMAC key from the username and password
 	sourceKey := GetSourceKey(username, password)
-	encryptKey, hmacKey := GetTwoHASHKDFKeys(sourceKey, "encrypt", "mac")
+	encryptKey, hmacKey, err := GetTwoHASHKDFKeys(sourceKey, "encrypt", "mac")
+	if err != nil {
+		return nil, errors.New("failed to generate encryption and HMAC keys")
+	}
 
+	// HMAC Check
+	err = CheckTag(msg, tag, hmacKey)
+	if err != nil {
+		return nil, errors.New("data integrity check failed: either wrong credentials or tampering")
+	}
+
+	//decrypt + unmarshall message
+	decryptedMessage := userlib.SymDec(encryptKey, msg)
 	var userdata User
-	return userdata, nil
+	err = json.Unmarshal(decryptedMessage, &userdata)
+	if err != nil {
+		return nil, errors.New("failed to unmarshal user data")
+	}
+
+	//username check
+	if userdata.Username != username {
+		return nil, errors.New("retrieved username does not match expected username")
+	}
+	return &userdata, nil
 }
 
 func (userdata *User) StoreFile(filename string, content []byte) (err error) {
@@ -415,7 +446,7 @@ func EncryptThenSign(txt interface{}, user string, sk userlib.DSSignKey) (msg, s
 	// convert to byte array, check for error
 	plaintext, err := json.Marshal(txt)
 	if err != nil {
-		return nil, errors.New(strings.ToTitle("Marshal failed"))
+		return nil, nil, errors.New(strings.ToTitle("Marshal failed"))
 	}
 
 	// encrypt using user public key, check for error
