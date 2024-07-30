@@ -1,5 +1,9 @@
 package client
 
+/** OH QUESTION: what if user inputs the same username but different password, generating a different UUID even though the usernames are the same?
+does the username have sufficient enough entropy?
+what could be an alternate to storing source keys and calculating keys with deterministic salts?
+can uuids only store marshal-ed data? **/
 // CS 161 Project 2
 
 // Only the following imports are allowed! ANY additional imports
@@ -112,64 +116,123 @@ const LENGTH = 16
 
 type User struct {
 	Username  string
-	Sourcekey []byte
 	RSAkey    userlib.PKEDecKey
 	Sigkey    userlib.DSSignKey
-
-	// You can add other attributes here if you want! But note that in order for attributes to
-	// be included when this struct is serialized to/from JSON, they must be capitalized.
-	// On the flipside, if you have an attribute that you want to be able to access from
-	// this struct's methods, but you DON'T want that value to be included in the serialized value
-	// of this struct that's stored in datastore, then you can use a "private" variable (e.g. one that
-	// begins with a lowercase letter).
+	sourceKey []byte
 }
 
 type Owner struct {
-	Meta        userlib.UUID
-	Invitations userlib.UUID
-	// keys ?
+	Meta           userlib.UUID
+	Sourcekey      []byte // used to generate meta keys
+	InvitationList userlib.UUID
+	ListKey        []byte // used to generate invitation list keys
 }
 
 type Access struct {
-	Invitation     userlib.UUID
-	MetaEncryptkey []byte
-	MetaMACkey     []byte
+	Invitation userlib.UUID
+	Sourcekey  []byte // used to generate invitation keys
 }
 
-type InvitiationMeta struct {
-	Invitations map[string]userlib.UUID
+type InvitationList struct {
+	Invitations map[string]userlib.UUID // username - UUID
+}
+
+type InvitationMeta struct {
+	Invitation userlib.UUID
+	Sourcekey  []byte // used to generate invitation keys
 }
 
 type Invitation struct {
-	Meta           userlib.UUID
-	MetaEncryptkey []byte
-	MetaMACkey     []byte
+	Meta      userlib.UUID
+	Sourcekey []byte // used to generate meta keys
 }
 
 type Meta struct {
-	Start          userlib.UUID
-	End            userlib.UUID
-	FileEncryptkey []byte
-	FileMACkey     []byte
+	Start     userlib.UUID
+	End       userlib.UUID
+	Sourcekey []byte // used as source key to generate file keys
 }
 
 type File struct {
 	Contents string
-	Next     userlib.UUID // is there risk to using same key?
+	Next     userlib.UUID
 }
 
 // NOTE: The following methods have toy (insecure!) implementations.
 
 func InitUser(username string, password string) (userdataptr *User, err error) {
-	var userdata User
-	userdata.Username = username
-	return &userdata, nil
+
+	// error check: check if username is an empty string
+	if username == "" {
+		return nil, errors.New("username cannot be empty")
+	}
+
+	// generate UUID
+	userUUID := GetUserUUID(username, password)
+
+	// error check: check if username already exists
+	_, ok := userlib.DatastoreGet(userUUID)
+	if ok {
+		return nil, errors.New("username already exists")
+	}
+
+	// generate source key
+	sourceKey := GetSourceKey(username, password)
+
+	// generate asynch and symmetric keys
+	RSAPublicKey, RSAPrivateKey, DSSignKey, DSVerifyKey := GetAsynchKeys()
+	encryptKey, hmacKey := GetTwoHASHKDFKeys(sourceKey, "encrypt", "mac")
+
+	// put public values into keystore
+	userlib.KeystoreSet(username+" public key", RSAPublicKey)
+	userlib.KeystoreSet(username+" signature key", DSVerifyKey)
+
+	// create user struct
+	userdata := &User{
+		Username:  username,
+		RSAkey:    RSAPrivateKey,
+		Sigkey:    DSSignKey,
+		sourceKey: sourceKey,
+	}
+
+	// get encrypted msg and mac tag
+	// userBytes, err := json.Marshal(userdata)
+	msg, tag := EncryptThenMac(userdata, encryptKey, hmacKey)
+
+	// generate value for datastore and store
+	encryptedUserdata := GenerateUUIDVal(msg, tag)
+	userlib.DatastoreSet(userUUID, encryptedUserdata)
+	return userdata, nil
 }
 
 func GetUser(username string, password string) (userdataptr *User, err error) {
+
+	// error check: empty username
+	if username == "" {
+		return nil, errors.New("username cannot be empty")
+	}
+
+	// generate UUID
+	userUUID := GetUserUUID(username, password)
+
+	// error check: repeat username
+	encryptedUserdata, ok := userlib.DatastoreGet(userUUID)
+	if !ok {
+		return nil, errors.New("username does not exist")
+	}
+
+	//unmarshall the data
+	// separate tag + mac
+	// check tag (this can also be a password check)
+	// unmarshall message
+	// decrypt message
+	// return decrypted data
+
+	sourceKey := GetSourceKey(username, password)
+	encryptKey, hmacKey := GetTwoHASHKDFKeys(sourceKey, "encrypt", "mac")
+
 	var userdata User
-	userdataptr = &userdata
-	return userdataptr, nil
+	return userdata, nil
 }
 
 func (userdata *User) StoreFile(filename string, content []byte) (err error) {
@@ -218,87 +281,224 @@ func (userdata *User) RevokeAccess(filename string, recipientUsername string) er
 // Helper Functions
 
 // assumes password has sufficient entropy to create non-bruteforceable UUID and sourcekey
-func GetUserUUIDAndSourceKey(user, password string) (UUID userlib.UUID, sourcekey []byte) {
+func GetUserUUID(user, password string) (UUID userlib.UUID, err error) {
 	// generate uuid
 	userbytes := []byte(user)
 	salt1 := []byte("UUID")
-	UUID, err1 := uuid.FromBytes(userlib.Argon2Key(userbytes, salt1, LENGTH))
-
-	// generate sourcekey
-	passwordbytes := []byte(user + password)
-	salt2 := []byte("sourcekey")
-	sourcekey = userlib.Argon2Key(passwordbytes, salt2, LENGTH)
+	UUID, err = uuid.FromBytes(userlib.Argon2Key(userbytes, salt1, LENGTH))
 
 	// check for error
-	if err1 != nil {
-		print(err1.Error())
+	if err != nil {
+		return uuid.UUID{}, errors.New(strings.ToTitle("Conversion to UUID failed"))
 	}
 	return
 }
 
-func GetAsynchKeys() (pk userlib.PKEEncKey, sk userlib.PKEDecKey, signpriv userlib.DSSignKey, signpub userlib.DSVerifyKey) {
+func GetSourceKey(user, password string) (sourcekey []byte) {
+	passwordbytes := []byte(password)
+	sourcekey = userlib.Argon2Key(passwordbytes, []byte(user), LENGTH)
+	return
+}
+
+func GetAsynchKeys() (pk userlib.PKEEncKey, sk userlib.PKEDecKey, signpriv userlib.DSSignKey, signpub userlib.DSVerifyKey, err error) {
 	// generate asymmetric encryption keys
-	pk, sk, err1 := userlib.PKEKeyGen()
+	pk, sk, err = userlib.PKEKeyGen()
 
 	// generate asymmetric signature keys
-	signpriv, signpub, err2 := userlib.DSKeyGen()
+	signpriv, signpub, err1 := userlib.DSKeyGen()
 
 	// check for errors
+	if err != nil {
+		return pk, sk, signpriv, signpub, errors.New(strings.ToTitle("RSA KeyGen failed"))
+	}
+	if err1 != nil {
+		return pk, sk, signpriv, signpub, errors.New(strings.ToTitle("Signature KeyGen failed"))
+	}
+	return
+}
+
+// given secure source key this should produce fast secure keys
+func GetTwoHASHKDFKeys(sourcekey []byte, purpose1, purpose2 string) (key1, key2 []byte, err error) {
+	// generate keys and check errors
+	key1, err = userlib.HashKDF(sourcekey, []byte(purpose1))
+	if err != nil {
+		return nil, nil, errors.New(strings.ToTitle("Key creation failed"))
+	}
+
+	key2, err = userlib.HashKDF(sourcekey, []byte(purpose2))
+	if err != nil {
+		return nil, nil, errors.New(strings.ToTitle("Key creation failed"))
+	}
+	return
+}
+
+func GetAccessUUID(user User, filename string) (UUID userlib.UUID, err error) {
+	// hash username and check error
+	accessbytes := []byte(filename)
+	accesshash, err := userlib.HashKDF(user.sourceKey, accessbytes)
+	if err != nil {
+		return uuid.UUID{}, errors.New(strings.ToTitle("Hashing failed"))
+	}
+
+	// convert to byte and check error
+	UUID, err = uuid.FromBytes(accesshash[:LENGTH])
+	if err != nil {
+		return uuid.UUID{}, errors.New(strings.ToTitle("Conversion to UUID failed"))
+	}
+	return
+}
+
+func GetInviteUUID(owner *User, sharee, filename string) (UUID userlib.UUID, err error) {
+	// hash username and check error
+	invitebytes := []byte(owner.Username + filename + sharee)
+	invitehash, err := userlib.HashKDF(owner.sourceKey, invitebytes)
+	if err != nil {
+		return uuid.UUID{}, errors.New(strings.ToTitle("Hashing failed"))
+	}
+
+	// convert to byte and check error
+	UUID, err = uuid.FromBytes(invitehash[:LENGTH])
+	if err != nil {
+		return uuid.UUID{}, errors.New(strings.ToTitle("file not found"))
+	}
+	return
+}
+
+func GenerateUUIDVal(msg, tag []byte) (value []byte, err error) {
+	// create map
+	Map := map[string][]byte{
+		"msg": msg,
+		"tag": tag,
+	}
+
+	// generate byte array
+	value, err = json.Marshal(Map)
+	if err != nil {
+		return nil, errors.New(strings.ToTitle("file not found"))
+	}
+	return
+}
+
+func UnpackValue(value []byte) (msg, tag []byte, err error) {
+	// unmarshall datastore value
+	unpackedData := make(map[string][]byte)
+	err = json.Unmarshal(value, &unpackedData)
+
+	// check for error unmarshalling and return
+	if err != nil {
+		return nil, nil, errors.New(strings.ToTitle("Unmarshal failed"))
+	}
+	msg, tag = unpackedData["msg"], unpackedData["tag"]
+	return
+}
+
+func EncryptThenMac(txt interface{}, key1, key2 []byte) (msg, tag []byte) {
+	// convert text to bytes and check for error
+	plaintext, err1 := json.Marshal(txt)
 	if err1 != nil {
 		print(err1.Error())
 	}
-	if err2 != nil {
-		print(err2.Error())
-	}
-	return
-}
 
-// given secure source key and secure purposes should produce secure keys
-func GetTwoHASHKDFKeys(sourcekey []byte, purpose1, purpose2 string) (key1, key2 []byte) {
-	// generate keys
-	key1, err1 := userlib.HashKDF(sourcekey, []byte(purpose1))
-	key2, err2 := userlib.HashKDF(sourcekey, []byte(purpose2))
-
-	// check for errors
-	if err1 != nil {
-		print(err1.Error())
-	}
-	if err2 != nil {
-		print(err2.Error())
-	}
-	return
-}
-
-func GetRandomSourceKey() (key []byte) {
-	// generate random values
-	rand, salt := userlib.RandomBytes(LENGTH), userlib.RandomBytes(LENGTH)
-	key = userlib.Argon2Key(rand, salt, LENGTH)
-	return
-}
-
-func GetTwoRandomSourceKeys() (key1, key2 []byte) {
-	// generate random values
-	rand1, rand2 := userlib.RandomBytes(LENGTH), userlib.RandomBytes(LENGTH)
-	salt1, salt2 := userlib.RandomBytes(LENGTH), userlib.RandomBytes(LENGTH)
-	key1, key2 = userlib.Argon2Key(rand1, salt1, LENGTH), userlib.Argon2Key(rand2, salt2, LENGTH)
-	return
-}
-
-func EncryptThenMac(txt string, key1, key2 []byte) (msg, tag []byte) {
-	// encrypt
+	// encrypt and mac
 	rndbytes := userlib.RandomBytes(LENGTH)
-	txtbytes, err1 := json.Marshal(txt)
-	msg = userlib.SymEnc(key1, rndbytes, txtbytes)
-
-	// mac
+	msg = userlib.SymEnc(key1, rndbytes, plaintext)
 	tag, err2 := userlib.HMACEval(key2, msg)
 
-	// check for error
-	if err1 != nil {
-		print(err1.Error())
-	}
+	// check for error and return
 	if err2 != nil {
 		print(err2.Error())
+	}
+	return
+}
+
+func EncryptThenSign(txt interface{}, user string, sk userlib.DSSignKey) (msg, sig []byte, err error) {
+	// convert to byte array, check for error
+	plaintext, err := json.Marshal(txt)
+	if err != nil {
+		return nil, errors.New(strings.ToTitle("Marshal failed"))
+	}
+
+	// encrypt using user public key, check for error
+	pubkey, ok := userlib.KeystoreGet(user + " public key")
+	if !ok {
+		return nil, nil, errors.New(strings.ToTitle("KeystoreGet failed"))
+	}
+	ciphertext, err := userlib.PKEEnc(pubkey, plaintext)
+	if err != nil {
+		return nil, nil, errors.New(strings.ToTitle("Encryption failed"))
+	}
+
+	// sign, check for error, and return
+	sig, err = userlib.DSSign(sk, ciphertext)
+	if err != nil {
+		return nil, nil, errors.New(strings.ToTitle("Signing failed"))
+	}
+	return
+}
+
+func CheckTag(msg, tag, key2 []byte) (err error) {
+	// compute tag and check error
+	computedTag, err := userlib.HMACEval(key2, msg)
+	if err != nil {
+		return err
+	}
+
+	if userlib.HMACEqual(tag, computedTag) {
+		return
+	}
+	return errors.New("Integrity check failed")
+}
+
+func CheckSignature(msg, sig []byte, user string) (err error) {
+	// get verification key, check error
+	sk, ok := userlib.KeystoreGet(user + " signature key")
+	if !ok {
+		return errors.New("Could not get sign key")
+	}
+
+	// verify signature
+	err = userlib.DSVerify(sk, msg, sig)
+	if err != nil {
+		return errors.New("Could not verify sign key")
+	}
+	return
+}
+
+func DecryptMsg(msg, key1 []byte) (data interface{}, err error) {
+	// decrypt msg
+	plaintext := userlib.SymDec(key1, msg)
+
+	// unmarshal data to get original struct
+	err = json.Unmarshal(plaintext, &data)
+	if err != nil {
+		return nil, errors.New(strings.ToTitle("Unmarshalling failed"))
+	}
+	return
+}
+
+func DecryptAsynchMsg(msg []byte, pk userlib.PKEDecKey) (data interface{}, err error) {
+	// decrypt msg
+	plaintext, err := userlib.PKEDec(pk, msg)
+	if err != nil {
+		return nil, errors.New(strings.ToTitle("Decryption failed"))
+	}
+
+	// unmarshal data to get original struct and check for error
+	err = json.Unmarshal(plaintext, &data)
+	if err != nil {
+		return nil, errors.New(strings.ToTitle("Unmarshalling failed"))
+	}
+	return
+}
+
+func GetRandomKey(user *User) (salt, key []byte, err error) {
+	// generate new random key
+	sourcekey, salt := user.sourceKey, userlib.RandomBytes(LENGTH)
+	key, err = userlib.HashKDF(sourcekey, salt)
+
+	// check for error
+	if err != nil {
+		return nil, nil, errors.New(strings.ToTitle("file not found"))
 	}
 	return
 }
