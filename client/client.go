@@ -306,11 +306,10 @@ func (userdata *User) StoreFile(filename string, content []byte) (err error) {
 	return nil
 }
 
-func (userdata *User) AppendToFile(filename string, content []byte) error {
-	return nil
-}
-
 func (userdata *User) LoadFile(filename string) (content []byte, err error) {
+
+	//load UUID
+
 	storageKey, err := uuid.FromBytes(userlib.Hash([]byte(filename + userdata.Username))[:16])
 	if err != nil {
 		return nil, err
@@ -321,6 +320,39 @@ func (userdata *User) LoadFile(filename string) (content []byte, err error) {
 	}
 	err = json.Unmarshal(dataJSON, &content)
 	return content, err
+
+}
+
+func (userdata *User) AppendToFile(filename string, content []byte) error {
+	metaUUID, err := GetAccessUUID(*userdata, filename)
+	if err != nil {
+		return err
+	}
+
+	//Retrieve the file metadata
+	metaDataEncrypted, ok := userlib.DatastoreGet(metaUUID)
+	if !ok {
+		return errors.New("file metadata not found")
+	}
+
+	metaMsg, metaTag, err := UnpackValue(metaDataEncrypted)
+	if err != nil {
+		return err
+	}
+
+	// Generate encryption and MAC keys for the metadata
+	metaEncKey, metaMacKey, err := GetTwoHASHKDFKeys(userdata.sourceKey, "metaEncrypt", "metaMac")
+	if err != nil {
+		return err
+	}
+
+	// HMAC check
+	err = CheckTag(metaMsg, metaTag, metaMacKey)
+	if err != nil {
+		return errors.New("file metadata integrity check failed")
+	}
+
+	return nil
 }
 
 func (userdata *User) CreateInvitation(filename string, recipientUsername string) (
@@ -339,6 +371,7 @@ func (userdata *User) RevokeAccess(filename string, recipientUsername string) er
 // Helper Functions
 
 // assumes password has sufficient entropy to create non-bruteforceable UUID and sourcekey
+// only use the username to determine where the stuff is at,
 func GetUserUUID(user, password string) (UUID userlib.UUID, err error) {
 	// generate uuid
 	userbytes := []byte(user)
