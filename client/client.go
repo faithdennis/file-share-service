@@ -670,7 +670,18 @@ func (userdata *User) AppendToFile(filename string, content []byte) error {
 
 func (userdata *User) CreateInvitation(filename string, recipientUsername string) (
 	invitationPtr uuid.UUID, err error) {
-	return
+	
+	// get the metadata UUID
+	// get metadata
+	// check integrity
+	// decrypt metadata
+	// check if recipient exists 
+	// generate new shared key
+	// encrypt shared key with public key
+	// create invitation struct 
+	// generate invite uuid
+	// marshall + store invite
+	// return invite uuid
 }
 
 func (userdata *User) AcceptInvitation(senderUsername string, invitationPtr uuid.UUID, filename string) error {
