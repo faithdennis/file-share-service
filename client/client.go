@@ -1,7 +1,6 @@
 package client
 
-/** OH QUESTION: what if user inputs the same username but different password, generating a different UUID even though the usernames are the same?
-does the username have sufficient enough entropy?
+/** OH QUESTION:
 what could be an alternate to storing source keys and calculating keys with deterministic salts?
 can uuids only store marshal-ed data? **/
 // CS 161 Project 2
@@ -113,6 +112,9 @@ func someUsefulThings() {
 // A Go struct is like a Python or Java class - it can have attributes
 // (e.g. like the Username attribute) and methods (e.g. like the StoreFile method below).
 const LENGTH = 16
+const ENCRYPT = "encrypt"
+const MAC = "mac"
+const ACCESS = "access"
 
 type User struct {
 	Username  string
@@ -149,12 +151,12 @@ type Invitation struct {
 
 type Meta struct {
 	Start     userlib.UUID
-	End       userlib.UUID
+	Last       userlib.UUID
 	Sourcekey []byte // used as source key to generate file keys
 }
 
 type File struct {
-	Contents string
+	Contents []byte
 	Next     userlib.UUID
 }
 
@@ -168,7 +170,10 @@ func InitUser(username string, password string) (userdataptr *User, err error) {
 	}
 
 	// generate UUID
-	userUUID, err := GetUserUUID(username, password)
+	userUUID, err := GetUserUUID(username)
+	if err != nil {
+		return nil, err
+	}
 
 	// error check: check if username already exists
 	_, ok := userlib.DatastoreGet(userUUID)
@@ -184,7 +189,7 @@ func InitUser(username string, password string) (userdataptr *User, err error) {
 	if err != nil {
 		return nil, errors.New("GetAsynchKeys error")
 	}
-	encryptKey, hmacKey, err := GetTwoHASHKDFKeys(sourceKey, "encrypt", "mac")
+	encryptKey, hmacKey, err := GetTwoHASHKDFKeys(sourceKey, ENCRYPT, MAC)
 	if err != nil {
 		return nil, errors.New("GetTwoHASHKDFKeys error")
 	}
@@ -203,14 +208,17 @@ func InitUser(username string, password string) (userdataptr *User, err error) {
 
 	// get encrypted msg and mac tag
 	// userBytes, err := json.Marshal(userdata)
-	msg, tag := EncryptThenMac(userdata, encryptKey, hmacKey)
+	msg, tag, err := EncryptThenMac(userdata, encryptKey, hmacKey)
+	if err != nil {
+		return nil, err
+	}
 
 	// generate value for datastore and store
-	encryptedUserdata, err := GenerateUUIDVal(msg, tag)
+	value, err := GenerateUUIDVal(msg, tag)
 	if err != nil {
 		return nil, errors.New("GenerateUUIDVal error")
 	}
-	userlib.DatastoreSet(userUUID, encryptedUserdata)
+	userlib.DatastoreSet(userUUID, value)
 	return userdata, nil
 }
 
@@ -222,11 +230,11 @@ func GetUser(username string, password string) (userdataptr *User, err error) {
 	}
 
 	// generate UUID
-	userUUID, err := GetUserUUID(username, password)
+	userUUID, err := GetUserUUID(username)
 	if err != nil {
 		return nil, errors.New("GetUserUUID error")
 	}
-	// error check: repeat username
+	// error check: user doesn't exist
 	encryptedUserdata, ok := userlib.DatastoreGet(userUUID)
 	if !ok {
 		return nil, errors.New("username does not exist")
@@ -240,7 +248,7 @@ func GetUser(username string, password string) (userdataptr *User, err error) {
 
 	// Generate the source key, encryption key, and HMAC key from the username and password
 	sourceKey := GetSourceKey(username, password)
-	encryptKey, hmacKey, err := GetTwoHASHKDFKeys(sourceKey, "encrypt", "mac")
+	encryptKey, hmacKey, err := GetTwoHASHKDFKeys(sourceKey, ENCRYPT, MAC)
 	if err != nil {
 		return nil, errors.New("failed to generate encryption and HMAC keys")
 	}
@@ -259,6 +267,8 @@ func GetUser(username string, password string) (userdataptr *User, err error) {
 		return nil, errors.New("failed to unmarshal user data")
 	}
 
+	userdata.sourceKey = sourceKey
+
 	//username check
 	if userdata.Username != username {
 		return nil, errors.New("retrieved username does not match expected username")
@@ -267,42 +277,95 @@ func GetUser(username string, password string) (userdataptr *User, err error) {
 }
 
 func (userdata *User) StoreFile(filename string, content []byte) (err error) {
-	//generate file metadata UUID - helper?
-
+	// generate new file UUID and file sourcekey
 	fileUUID := uuid.New()
-	nextFileUUID := uuid.New()
-	metaUUID := uuid.New()
-
-	// Generate random symmetric keys for file encryption and HMAC
-	//QUESTION: do we want HMAC to be deterministic?
-	fileEncryptKey := userlib.RandomBytes(userlib.AESKeySizeBytes)
-	fileHMACKey := userlib.RandomBytes(userlib.AESKeySizeBytes)
-
-	ciphertext, tag := EncryptThenMac(content, fileEncryptKey, fileHMACKey)
-	fileData, err := GenerateUUIDVal(ciphertext, tag)
+	fileSourceKey, err := GetRandomKey(userdata)
 	if err != nil {
-		return errors.New("failed to generate file data for storage")
+		return errors.New("Failed to get file sourcekey")
 	}
-	userlib.DatastoreSet(fileUUID, fileData)
 
-	// Construct the metadata (UUIDs and keys)
+	// add file to database
+	nextFileUUID, err := AddFileToDatabase(fileUUID, fileSourceKey, content)
+	if err != nil {
+		return errors.New("Failed to add file to datastore")
+	}
+
+	// generate accessUUID and keys
+	accessUUID, err := GetAccessUUID(*userdata, filename)
+	if err != nil {
+		return errors.New("Failed to get accessUUID")
+	}
+	accessStruct, ok := userlib.DatastoreGet(accessUUID)
+	accessKey, err := GetAccessKey(userdata.sourceKey)
+		if err != nil {
+			return errors.New("Failed to get access key")
+		} 
+	accessEncryptKey, accessHMACKey, err := GetTwoHASHKDFKeys(accessKey, ENCRYPT, MAC)
+
+	// check if access struct already exists in database
+	if ok {
+		// unpack, check tag, decrypt
+		encryptedBytes, tag, err := UnpackValue(accessStruct)
+		if err != nil {
+			return errors.New("Failed to unpack")
+		} 
+		err = CheckTag(encryptedBytes, tag, accessHMACKey)
+		if err != nil {
+			return errors.New("Integrity check failed")
+		} 
+		accessStruct, err := DecryptMsg(encryptedBytes, accessEncryptKey)
+		if err != nil {
+			return errors.New("Integrity check failed")
+		}
+	}
+
+	// generate new meta UUID and meta sourcekey
+	metaUUID := uuid.New()
+	metaSourceKey, err := GetRandomKey(userdata)
+	if err != nil {
+		return errors.New("Failed to get meta sourcekey")
+	}
+
+	// generate encryption and HMAC keys
+	metaEncryptKey, metaHMACKey, err2 := GetTwoHASHKDFKeys(metaSourceKey, ENCRYPT, MAC)
+	if err != nil {
+		return errors.New("Failed to get file HDKF")
+	}
+	
+	// Construct the metadata struct (UUIDs and keys)
 	fileMeta := Meta{
 		Start:     fileUUID,
-		End:       nextFileUUID,
-		Sourcekey: append(fileEncryptKey, fileHMACKey...),
+		Last:      nextFileUUID,
+		Sourcekey: fileSourceKey,
 	}
 
 	// Encrypt the metadata and create an HMAC tag
-	metaCiphertext, metaTag := EncryptThenMac(fileMeta, userlib.RandomBytes(userlib.AESKeySizeBytes), userlib.RandomBytes(userlib.AESKeySizeBytes))
+	metaCiphertext, metaTag, err := EncryptThenMac(fileMeta, metaEncryptKey, metaHMACKey)
+	if err != nil {
+		return errors.New("Failed to package data for entry into DataStore")
+	}
 
 	// Store the encrypted metadata and the HMAC tag in the datastore
-	metaData, err := GenerateUUIDVal(metaCiphertext, metaTag)
-	if err != nil {
-		return errors.New("failed to generate metadata for storage")
-	}
+	// metaData, err := GenerateUUIDVal(metaCiphertext, metaTag)
+	// if err != nil {
+	//	return errors.New("failed to generate metadata for storage")
+	//}
 	userlib.DatastoreSet(metaUUID, metaData)
-	//todo: access struct?
+	
+	// else {
+	//	access := Owner {
+	//		Meta: metaUUID,
+	//		Sourcekey: metaSourceKey,
+	//		InvitationList: uuid.New(),
+	//		ListKey: nil //FIX THIS PLEASE PLEASE PLEASE
+	//	}
 
+	//}
+
+
+
+
+	
 	return nil
 }
 
@@ -323,12 +386,40 @@ func (userdata *User) LoadFile(filename string) (content []byte, err error) {
 
 }
 
+
+
+
+
+
+
+
 func (userdata *User) AppendToFile(filename string, content []byte) error {
-	metaUUID, err := GetAccessUUID(*userdata, filename)
+	
+	accessUUID, err := GetAccessUUID(*userdata, filename)
+	encryptKey, hmacKey, err := GetTwoHASHKDFKeys(accessSourceKey, ENCRYPT, MAC)
+
+	// Generate the source key, encryption key, and HMAC key from the username and password
+	accessSourceKey := GetAccessKey(sourceKey)
+	encryptKey, hmacKey, err := GetTwoHASHKDFKeys(accessSourceKey, ENCRYPT, MAC)
 	if err != nil {
-		return err
+		return nil, errors.New("failed to generate encryption and HMAC keys")
 	}
 
+	// HMAC Check
+	err = CheckTag(msg, tag, hmacKey)
+	if err != nil {
+		return nil, errors.New("data integrity check failed: file has been tampered with")
+	}
+
+	//decrypt + unmarshall message
+	decryptedMessage := userlib.SymDec(encryptKey, msg)
+	var accessFile Owner
+	err = json.Unmarshal(decryptedMessage, &accessFile)
+	if err != nil {
+		return nil, errors.New("failed to unmarshal file")
+	}
+
+	metaUUID := Owner.Meta
 	//Retrieve the file metadata
 	metaDataEncrypted, ok := userlib.DatastoreGet(metaUUID)
 	if !ok {
@@ -352,6 +443,15 @@ func (userdata *User) AppendToFile(filename string, content []byte) error {
 		return errors.New("file metadata integrity check failed")
 	}
 
+	//Decrypt Metadata
+	decryptedMeta := DecryptMsg(metaMsg, metaEncKey)
+
+	// go to last value in Meta
+
+	//encrypt file 
+	// add it to wherever we put the store file
+	//generate new uuid
+
 	return nil
 }
 
@@ -372,7 +472,7 @@ func (userdata *User) RevokeAccess(filename string, recipientUsername string) er
 
 // assumes password has sufficient entropy to create non-bruteforceable UUID and sourcekey
 // only use the username to determine where the stuff is at,
-func GetUserUUID(user, password string) (UUID userlib.UUID, err error) {
+func GetUserUUID(user string) (UUID userlib.UUID, err error) {
 	// generate uuid
 	userbytes := []byte(user)
 	salt1 := []byte("UUID")
@@ -483,21 +583,21 @@ func UnpackValue(value []byte) (msg, tag []byte, err error) {
 	return
 }
 
-func EncryptThenMac(txt interface{}, key1, key2 []byte) (msg, tag []byte) {
+func EncryptThenMac(txt interface{}, key1, key2 []byte) (msg, tag []byte, err Error) {
 	// convert text to bytes and check for error
-	plaintext, err1 := json.Marshal(txt)
-	if err1 != nil {
-		print(err1.Error())
+	plaintext, err := json.Marshal(txt)
+	if err != nil {
+		return nil, nil, errors.New(strings.ToTitle("Marshal failed"))
 	}
 
 	// encrypt and mac
 	rndbytes := userlib.RandomBytes(LENGTH)
 	msg = userlib.SymEnc(key1, rndbytes, plaintext)
-	tag, err2 := userlib.HMACEval(key2, msg)
+	tag, err = userlib.HMACEval(key2, msg)
 
 	// check for error and return
-	if err2 != nil {
-		print(err2.Error())
+	if err != nil {
+		return nil, nil, errors.New(strings.ToTitle("HMAC failed"))
 	}
 	return
 }
@@ -582,14 +682,61 @@ func DecryptAsynchMsg(msg []byte, pk userlib.PKEDecKey) (data interface{}, err e
 	return
 }
 
-func GetRandomKey(user *User) (salt, key []byte, err error) {
+func GetRandomKey(user *User) (key []byte, err error) {
 	// generate new random key
 	sourcekey, salt := user.sourceKey, userlib.RandomBytes(LENGTH)
 	key, err = userlib.HashKDF(sourcekey, salt)
 
 	// check for error
 	if err != nil {
-		return nil, nil, errors.New(strings.ToTitle("file not found"))
+		return nil, errors.New(strings.ToTitle("file not found"))
 	}
+	return
+}
+
+func GetAccessStruct(invitation userlib.UUID, sourcekey []byte) (access interface{}) {
+	access = Access{
+		Invitation: invitation,
+		Sourcekey: sourcekey,
+	}
+	return 
+}
+
+func GetAccessKey(sourcekey []byte) (key []byte, err error) {
+	key, err = userlib.HashKDF(sourcekey, []byte(ACCESS))
+	if err != nil {
+		return nil, nil, errors.New(strings.ToTitle("Key creation failed"))
+	}
+	return
+}
+
+func AddFileToDatabase(fileUUID userlib.UUID, fileSourceKey, content []byte) (nextFileUUID userlib.UUID, err error) {
+	// generate UUID for next
+	nextFileUUID = uuid.New()
+	
+	// generate keys 
+	fileEncryptKey, fileHMACKey, err := GetTwoHASHKDFKeys(fileSourceKey, ENCRYPT, MAC)
+	if err != nil {
+		return fileUUID, nextFileUUID, nil, errors.New("Failed to get keys")
+	}
+
+	// generate file struct
+	file := File{
+		Contents: content,
+		Next:     nextFileUUID,
+	}
+
+	// encrypt file struct
+	encryptedBytes, tag, err := EncryptThenMac(file, fileEncryptKey, fileHMACKey)
+	if err != nil {
+		return fileUUID, nextFileUUID, nil, errors.New("Failed to EncryptThenMac")
+	}
+
+	// create value and add to Datastore
+	value, err := GenerateUUIDVal(encryptedBytes, tag)
+	if err != nil {
+		return fileUUID, nextFileUUID, nil, errors.New("Failed to package data for entry into DataStore")
+	}
+	userlib.DatastoreSet(fileUUID, value)
 	return
 }
