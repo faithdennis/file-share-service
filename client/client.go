@@ -676,22 +676,19 @@ func (userdata *User) CreateInvitation(filename string, recipientUsername string
 		return uuid.Nil, errors.New("Failed to generate encryption and HMAC keys for Access Struct")
 	}
 
-	/*
-		wtf is this?
-			// Unpack, check tag, and decrypt
-			accessMsg, accessTag, err := UnpackValue(accessValue)
-			if err != nil {
-				return uuid.Nil, errors.New("Failed to unpack Access Struct")
-			}
-			err = CheckTag(accessMsg, accessTag, accessHMACKey)
-			if err != nil {
-				return uuid.Nil, errors.New("Integrity check failed: Access Struct has been tampered with")
-			}
-			accessStruct, err := DecryptMsg(accessMsg, accessEncryptKey)
-			if err != nil {
-				return uuid.Nil, errors.New("Could not decrypt Access Struct")
-			}
-	*/
+	// Unpack, check tag, and decrypt
+	accessMsg, accessTag, err := UnpackValue(accessValue)
+	if err != nil {
+		return uuid.Nil, errors.New("Failed to unpack Access Struct")
+	}
+	err = CheckTag(accessMsg, accessTag, accessHMACKey)
+	if err != nil {
+		return uuid.Nil, errors.New("Integrity check failed: Access Struct has been tampered with")
+	}
+	accessStruct, err := DecryptMsg(accessMsg, accessEncryptKey)
+	if err != nil {
+		return uuid.Nil, errors.New("Could not decrypt Access Struct")
+	}
 
 	// Get meta UUID and keys
 	metaUUID, metaSourceKey, err := GetMetaUUIDAndSourceKey(accessStruct)
@@ -793,7 +790,6 @@ func (userdata *User) AcceptInvitation(senderUsername string, invitationPtr uuid
 
 	// go to invite itself
 	inviteUUID := metaInvite.InvitationUUID
-	accessUUID // the uuid of the access struct
 	inviteSourceKey := metaInvite.InvitationSourcekey
 
 	// Get the invitation data from the datastore
@@ -836,7 +832,7 @@ func (userdata *User) AcceptInvitation(senderUsername string, invitationPtr uuid
 	// Encrypt the access and create an HMAC tag
 	accessMsg, accessTag, err := EncryptThenMac(accessFile, accessEncKey, accessHMACKey)
 	if err != nil {
-		return uuid.Nil, errors.New("Failed to package data for entry into DataStore")
+		return errors.New("Failed to package data for entry into DataStore")
 	}
 
 	// Store the encrypted invite and the HMAC tag in the datastore
@@ -846,6 +842,7 @@ func (userdata *User) AcceptInvitation(senderUsername string, invitationPtr uuid
 	}
 
 	userlib.DatastoreSet(accessUUID, accessData)
+	return nil
 
 }
 
