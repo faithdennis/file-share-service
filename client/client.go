@@ -772,7 +772,7 @@ func (userdata *User) CreateInvitation(filename string, recipientUsername string
 		// get invitation list
 		inviteListUUID := accessStruct.InvitationList
 		inviteListKey := accessStruct.ListKey
-		inviteListData, ok := userlib.DatastoreGet(inviteUUID)
+		inviteListData, ok := userlib.DatastoreGet(inviteListUUID)
 		if !ok {
 			return uuid.Nil, errors.New("invalid or missing inviteListData UUID")
 		}
@@ -796,7 +796,6 @@ func (userdata *User) CreateInvitation(filename string, recipientUsername string
 		// decrypt invitation list using invitation list key
 
 		inviteListDataUnpacked, err := DecryptInvitationListMsg(inviteListMsg, inviteListEncryptKey)
-		// go to uuid of map
 		// add value to the map
 		// re-encrypt + hmac
 
