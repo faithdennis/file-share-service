@@ -19,7 +19,6 @@ can uuids only store marshal-ed data? **/
 
 import (
 	"encoding/json"
-	"reflect"
 
 	userlib "github.com/cs161-staff/project2-userlib"
 	"github.com/google/uuid"
@@ -1421,10 +1420,6 @@ func AddFileToDatabase(fileUUID userlib.UUID, fileSourceKey, content []byte) (ne
 	}
 	userlib.DatastoreSet(fileUUID, value)
 	return
-}
-
-func isAccessType(i interface{}) bool {
-	return reflect.TypeOf(i) == reflect.TypeOf(Access{})
 }
 
 func GetMetaUUIDAndSourceKey(accessStruct Access) (metaUUID userlib.UUID, metaSourceKey []byte, err error) {
