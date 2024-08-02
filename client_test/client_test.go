@@ -145,6 +145,15 @@ var _ = Describe("Client Tests", func() {
 			Expect(err).To(BeNil())
 
 			db1 := userlib.DatastoreGetMap()
+			// Extract keys from db1
+			var keys1 []userlib.UUID
+			for key := range db1 {
+				keys1 = append(keys1, key)
+			}
+
+			// Copy keys1 to a new slice using the built-in copy function
+			keys1Copy := make([]userlib.UUID, len(keys1))
+			copy(keys1Copy, keys1)
 
 			userlib.DebugMsg("Storing file data: %s", contentOne)
 			err = alice.StoreFile(aliceFile, []byte(contentOne))
@@ -152,11 +161,18 @@ var _ = Describe("Client Tests", func() {
 
 			userlib.DebugMsg("Get newly created UUID.")
 			db2 := userlib.DatastoreGetMap()
+			var keys2 []userlib.UUID
 			for key := range db2 {
-				if _, found := db1[key]; !found {
+				keys2 = append(keys2, key)
+			}
+
+			for _, key := range keys2 {
+				if !contains(keys1Copy, key) {
+					// Entry was added
 					diff = key
 				}
 			}
+			userlib.DebugMsg("New UUID created: %s", diff.String())
 
 			userlib.DebugMsg("Tampering with Alice's File.")
 			userlib.DatastoreSet(diff, maliciousByte)
@@ -165,6 +181,54 @@ var _ = Describe("Client Tests", func() {
 			Expect(err).ToNot(BeNil())
 			Expect(data).ToNot(Equal([]byte(contentOne)))
 
+		})
+
+		Specify("Integrity Test: Testing User.AppendToFile", func() {
+
+			userlib.DebugMsg("Initializing user Alice.")
+			alice, err = client.InitUser("alice", defaultPassword)
+			Expect(err).To(BeNil())
+
+			db1 := userlib.DatastoreGetMap()
+			// Extract keys from db1
+			var keys1 []userlib.UUID
+			for key := range db1 {
+				keys1 = append(keys1, key)
+			}
+
+			// Copy keys1 to a new slice using the built-in copy function
+			keys1Copy := make([]userlib.UUID, len(keys1))
+			copy(keys1Copy, keys1)
+
+			userlib.DebugMsg("Storing file data: %s", contentOne)
+			err = alice.StoreFile(aliceFile, []byte(contentOne))
+			Expect(err).To(BeNil())
+
+			userlib.DebugMsg("Get newly created UUID.")
+			db2 := userlib.DatastoreGetMap()
+			var keys2 []userlib.UUID
+			for key := range db2 {
+				keys2 = append(keys2, key)
+			}
+
+			var diffKeys []userlib.UUID
+			for _, key := range keys2 {
+				if !contains(keys1Copy, key) {
+					// Entry was added
+					diffKeys = append(diffKeys, key)
+				}
+			}
+
+			userlib.DebugMsg("Tampering with newly created UUIDs.")
+			for _, key := range diffKeys {
+				userlib.DatastoreSet(key, maliciousByte)
+				userlib.DebugMsg("New UUID created: %s", key.String())
+
+			}
+
+			userlib.DebugMsg("Attempting to append to tampered file.")
+			err = alice.AppendToFile("aliceFile.txt", []byte(" Appended text."))
+			Expect(err).ToNot(BeNil())
 		})
 	})
 
@@ -464,11 +528,23 @@ var _ = Describe("Client Tests", func() {
 				Expect(err).To(BeNil())
 			})
 
-			userlib.DebugMsg("Measuring bandwidth for appending 100 bytes.")
-			bandwidth100Bytes := measureBandwidth(func() {
-				err = alice.AppendToFile("testfile", make([]byte, 100))
-				Expect(err).To(BeNil())
-			})
+			var previousIterationBandwidth int
+
+			// Doing multiple appends
+			for i := 1; i <= 25; i++ {
+				userlib.DebugMsg("Measuring bandwidth for appending 100 bytes, iteration %d.", i)
+				iterationBandwidth := measureBandwidth(func() {
+					err = alice.AppendToFile("testfile", make([]byte, 100))
+					Expect(err).To(BeNil())
+				})
+				userlib.DebugMsg("Bandwidth for 100 bytes append: %d", iterationBandwidth)
+				if i == 1 {
+					previousIterationBandwidth = iterationBandwidth
+				} else {
+					Expect(iterationBandwidth).To(Equal(previousIterationBandwidth), "Bandwidth for 100 bytes append is not consistent across iterations")
+				}
+
+			}
 
 			userlib.DebugMsg("Measuring bandwidth for appending 0 bytes.")
 			bandwidth0Bytes := measureBandwidth(func() {
@@ -477,7 +553,6 @@ var _ = Describe("Client Tests", func() {
 			})
 
 			userlib.DebugMsg("Bandwidth for 1 byte append: %d", bandwidth1Byte)
-			userlib.DebugMsg("Bandwidth for 100 bytes append: %d", bandwidth100Bytes)
 			userlib.DebugMsg("Bandwidth for 0 bytes append: %d", bandwidth0Bytes)
 		})
 
@@ -545,29 +620,6 @@ var _ = Describe("Client Tests", func() {
 			Expect(err).ToNot(BeNil())
 		})
 
-		Specify("CreateInvitation Test: File name already exists for recipient", func() {
-			userlib.DebugMsg("Initializing user Alice.")
-			alice, err = client.InitUser("alice", defaultPassword)
-			Expect(err).To(BeNil())
-
-			userlib.DebugMsg("Initializing user Bob.")
-			bob, err = client.InitUser("bob", defaultPassword)
-			Expect(err).To(BeNil())
-
-			userlib.DebugMsg("Storing file data: %s", contentOne)
-			err = alice.StoreFile(aliceFile, []byte(contentOne))
-			Expect(err).To(BeNil())
-
-			userlib.DebugMsg("Creating invitation for Bob.")
-			invitationID, err := alice.CreateInvitation(aliceFile, "bob")
-			Expect(err).To(BeNil())
-			Expect(invitationID).ToNot(BeNil())
-
-			userlib.DebugMsg("Bob accepts the invitation with a new file name.")
-			err = bob.AcceptInvitation("alice", invitationID, bobFile)
-			Expect(err).To(BeNil())
-		})
-
 		Specify("CreateInvitation Test: Empty file name", func() {
 			userlib.DebugMsg("Initializing user Alice.")
 			alice, err = client.InitUser("alice", defaultPassword)
@@ -582,7 +634,10 @@ var _ = Describe("Client Tests", func() {
 			Expect(err).To(BeNil())
 
 			userlib.DebugMsg("Creating invitation with an empty file name.")
+<<<<<<< HEAD
 
+=======
+>>>>>>> 6b1f0e2b14cdf600a2fc07948b8fc36f0993b075
 			_, err := alice.CreateInvitation("", "bob")
 			Expect(err).To(BeNil())
 		})
