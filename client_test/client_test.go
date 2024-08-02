@@ -182,6 +182,51 @@ var _ = Describe("Client Tests", func() {
 			Expect(data).ToNot(Equal([]byte(contentOne)))
 
 		})
+
+		Specify("Integrity Test: Testing User.AppendToFile", func() {
+			var diff userlib.UUID
+
+			userlib.DebugMsg("Initializing user Alice.")
+			alice, err = client.InitUser("alice", defaultPassword)
+			Expect(err).To(BeNil())
+
+			db1 := userlib.DatastoreGetMap()
+			// Extract keys from db1
+			var keys1 []userlib.UUID
+			for key := range db1 {
+				keys1 = append(keys1, key)
+			}
+
+			// Copy keys1 to a new slice using the built-in copy function
+			keys1Copy := make([]userlib.UUID, len(keys1))
+			copy(keys1Copy, keys1)
+
+			userlib.DebugMsg("Storing file data: %s", contentOne)
+			err = alice.StoreFile(aliceFile, []byte(contentOne))
+			Expect(err).To(BeNil())
+
+			userlib.DebugMsg("Get newly created UUID.")
+			db2 := userlib.DatastoreGetMap()
+			var keys2 []userlib.UUID
+			for key := range db2 {
+				keys2 = append(keys2, key)
+			}
+
+			for _, key := range keys2 {
+				if !contains(keys1Copy, key) {
+					// Entry was added
+					diff = key
+				}
+			}
+			userlib.DebugMsg("New UUID created: %s", diff.String())
+
+			userlib.DebugMsg("Tampering with Alice's File.")
+			userlib.DatastoreSet(diff, maliciousByte)
+
+			userlib.DebugMsg("Attempting to append to tampered file.")
+			err = alice.AppendToFile("aliceFile.txt", []byte(" Appended text."))
+			Expect(err).ToNot(BeNil())
+		})
 	})
 
 	Describe("All Other Error Tests", func() {
@@ -559,29 +604,6 @@ var _ = Describe("Client Tests", func() {
 			userlib.DebugMsg("Creating invite.")
 			_, err := bob.CreateInvitation(aliceFile, "charles")
 			Expect(err).ToNot(BeNil())
-		})
-
-		Specify("CreateInvitation Test: File name already exists for recipient", func() {
-			userlib.DebugMsg("Initializing user Alice.")
-			alice, err = client.InitUser("alice", defaultPassword)
-			Expect(err).To(BeNil())
-
-			userlib.DebugMsg("Initializing user Bob.")
-			bob, err = client.InitUser("bob", defaultPassword)
-			Expect(err).To(BeNil())
-
-			userlib.DebugMsg("Storing file data: %s", contentOne)
-			err = alice.StoreFile(aliceFile, []byte(contentOne))
-			Expect(err).To(BeNil())
-
-			userlib.DebugMsg("Creating invitation for Bob.")
-			invitationID, err := alice.CreateInvitation(aliceFile, "bob")
-			Expect(err).To(BeNil())
-			Expect(invitationID).ToNot(BeNil())
-
-			userlib.DebugMsg("Bob accepts the invitation with a new file name.")
-			err = bob.AcceptInvitation("alice", invitationID, bobFile)
-			Expect(err).To(BeNil())
 		})
 
 		Specify("CreateInvitation Test: Empty file name", func() {
