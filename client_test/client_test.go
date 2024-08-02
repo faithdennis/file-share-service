@@ -634,10 +634,6 @@ var _ = Describe("Client Tests", func() {
 			Expect(err).To(BeNil())
 
 			userlib.DebugMsg("Creating invitation with an empty file name.")
-<<<<<<< HEAD
-
-=======
->>>>>>> 6b1f0e2b14cdf600a2fc07948b8fc36f0993b075
 			_, err := alice.CreateInvitation("", "bob")
 			Expect(err).To(BeNil())
 		})

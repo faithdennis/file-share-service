@@ -141,7 +141,7 @@ type Access struct {
 } **/
 
 type InvitationList struct {
-	Invitations map[string]userlib.UUID // username - UUID
+	Invitations map[userlib.UUID][]byte // invitation UUID to sourcekey
 }
 
 type InvitationMeta struct {
@@ -408,16 +408,16 @@ func (userdata *User) StoreFile(filename string, content []byte) (err error) {
 		}
 
 		invitationList := InvitationList{
-			Invitations: make(map[string]userlib.UUID),
+			Invitations: make(map[uuid.UUID][]byte),
 		}
 
-		accessEncryptKey, accessHMACKey, err := GetTwoHASHKDFKeys(userListKey, ENCRYPT, MAC)
+		invitationListEncryptKey, invitationListHMACKey, err := GetTwoHASHKDFKeys(userListKey, ENCRYPT, MAC)
 		if err != nil {
 			errors.New("failed to generate encryption and HMAC keys for invite list Struct")
 		}
 
 		// Encrypt and mac meta and return it back to the datastore
-		userListMsg, userListTag, err := EncryptThenMac(invitationList, metaEncryptKey, metaHMACKey)
+		userListMsg, userListTag, err := EncryptThenMac(invitationList, invitationListEncryptKey, invitationListHMACKey)
 		if err != nil {
 			return err
 		}
@@ -655,7 +655,6 @@ func (userdata *User) AppendToFile(filename string, content []byte) error {
 
 func (userdata *User) CreateInvitation(filename string, recipientUsername string) (
 	invitationPtr uuid.UUID, err error) {
-	// file
 	// check if user exits by seeing if their key exists in public keystore
 	_, ok := userlib.KeystoreGet(recipientUsername + " public key")
 	if !ok {
@@ -668,7 +667,7 @@ func (userdata *User) CreateInvitation(filename string, recipientUsername string
 
 	}
 
-	// Get the access UUID and check if it exists
+	// Get the access UUID, check if it exists, then get keys
 	accessUUID, err1 := GetAccessUUID(*userdata, filename)
 	if err1 != nil {
 		return uuid.Nil, err
@@ -677,8 +676,6 @@ func (userdata *User) CreateInvitation(filename string, recipientUsername string
 	if !ok {
 		return uuid.Nil, errors.New("file does not exist in user namespace")
 	}
-
-	// Generate the source key, encryption key, and HMAC key
 	accessSourceKey, err := GetAccessKey(userdata.sourceKey, filename)
 	if err != nil {
 		return uuid.Nil, errors.New("failed to get access sourcekey")
@@ -688,7 +685,7 @@ func (userdata *User) CreateInvitation(filename string, recipientUsername string
 		return uuid.Nil, errors.New("failed to generate encryption and HMAC keys for Access Struct")
 	}
 
-	// Unpack, check tag, and decrypt
+	// Unpack, check tag, and decrypt access struct
 	accessMsg, accessTag, err := UnpackValue(accessValue)
 	if err != nil {
 		return uuid.Nil, errors.New("failed to unpack Access Struct")
@@ -737,14 +734,17 @@ func (userdata *User) CreateInvitation(filename string, recipientUsername string
 	if err != nil {
 		return uuid.Nil, err
 	}
-	invitationUUID := uuid.New()
-	userlib.DatastoreSet(invitationUUID, invitationValue)
 
-	// create meta uuid
-	invitationMetaUUID, err := GetInviteUUID(userdata, recipientUsername, filename)
+	// MAKE THIS DETERMINIMISTIC
+	invitationUUID, err := GetInvitationUUID(userdata, recipientUsername, filename)
 	if err != nil {
 		return uuid.Nil, err
 	}
+	userlib.DatastoreSet(invitationUUID, invitationValue)
+
+	// create meta uuid
+	//TODO MAKE THIS RANDOM
+	invitationMetaUUID := uuid.New()
 
 	// create meta invitation
 	invitationMeta := InvitationMeta{
@@ -752,20 +752,17 @@ func (userdata *User) CreateInvitation(filename string, recipientUsername string
 		InvitationSourcekey: invitationSourceKey,
 	}
 
-	// encrypt + sign
-	metaInviteMsg, metaInviteSig, err := EncryptThenSign(invitationMeta, recipientUsername, userdata.Sigkey)
+	// encrypt, sign, and store invitation Meta
+	invitationMetaMsg, invitationMetaSig, err := EncryptThenSign(invitationMeta, recipientUsername, userdata.Sigkey)
 	if err != nil {
 		return uuid.Nil, err
 	}
-	invitationMetaValue, err := GenerateUUIDVal(metaInviteMsg, metaInviteSig)
+	invitationMetaValue, err := GenerateUUIDVal(invitationMetaMsg, invitationMetaSig)
 	if err != nil {
 		return uuid.Nil, err
 	}
-	// IDK HOW TO STORE THIS?
-<<<<<<< HEAD
+
 	userlib.DatastoreSet(invitationMetaUUID, invitationMetaValue)
-=======
-	userlib.DatastoreSet(metaInviteUUID, metaInviteData)
 
 	// also add invitationUUID, invitationSourceKey to invite list of owner
 	if accessStruct.IsOwner {
@@ -795,15 +792,32 @@ func (userdata *User) CreateInvitation(filename string, recipientUsername string
 		}
 		// decrypt invitation list using invitation list key
 
-		inviteListDataUnpacked, err := DecryptInvitationListMsg(inviteListMsg, inviteListEncryptKey)
-		// add value to the map
-		// re-encrypt + hmac
+		invitationListValue, err := DecryptInvitationListMsg(inviteListMsg, inviteListEncryptKey)
 
+		// add value to the map
+		invitationListValue.Invitations[invitationUUID] = invitationSourceKey
+
+		// re-encrypt + hmac
+		invitationListEncryptKey, invitationListHMACKey, err := GetTwoHASHKDFKeys(inviteListKey, ENCRYPT, MAC)
+		if err != nil {
+			errors.New("failed to generate encryption and HMAC keys for invite list Struct")
+		}
+
+		// Encrypt and mac meta and return it back to the datastore
+		inviteListMsg, inviteListTag, err = EncryptThenMac(invitationListValue, invitationListEncryptKey, invitationListHMACKey)
+		if err != nil {
+			return uuid.Nil, err
+		}
+
+		inviteListValue, err := GenerateUUIDVal(inviteListMsg, inviteListTag)
+		if err != nil {
+			return uuid.Nil, err
+		}
+		userlib.DatastoreSet(inviteListUUID, inviteListValue)
 	}
 
 	// add invitation
->>>>>>> 6b1f0e2b14cdf600a2fc07948b8fc36f0993b075
-	return metaInviteUUID, nil
+	return invitationMetaUUID, nil
 }
 
 func (userdata *User) AcceptInvitation(senderUsername string, invitationPtr uuid.UUID, filename string) error {
@@ -812,55 +826,47 @@ func (userdata *User) AcceptInvitation(senderUsername string, invitationPtr uuid
 	if err != nil {
 		return errors.New("could not get access uuid")
 	}
-
 	_, ok := userlib.DatastoreGet(accessUUID)
 	if ok {
 		return errors.New("recipient already has a file with the chosen filename")
 	}
 
-	// get invite metadata
-	inviteMetaData, ok := userlib.DatastoreGet(invitationPtr)
+	// Get invitation metadata from Datastore
+	invitationMetaValue, ok := userlib.DatastoreGet(invitationPtr)
 	if !ok {
 		return errors.New("no invitation meta")
 	}
 
-	// Unpack the invitation data
-	inviteMsg, inviteSig, err := UnpackValue(inviteMetaData)
+	// Unpack the invitation data, verify sender's signature, and decrypt the invitation
+	invitationMetaMsg, invitationMetaSig, err := UnpackValue(invitationMetaValue)
 	if err != nil {
 		return errors.New("failed to unpack invitation data")
 	}
-
-	// verify signature:
-	err = CheckSignature(inviteMsg, inviteSig, senderUsername)
+	err = CheckSignature(invitationMetaMsg, invitationMetaSig, senderUsername)
 	if err != nil {
 		return errors.New("failed to verify invitation signature")
 	}
-
-	// Decrypt the invitation meta via asych
-
-	metaInvite, err := DecryptAsynchMsg(inviteMsg, userdata.RSAkey)
+	invitationMetaStruct, err := DecryptAsynchMsg(invitationMetaMsg, userdata.RSAkey)
 	if err != nil {
 		return errors.New("failed to decrypt invitation")
 	}
 
-	// go to invite itself
-	inviteUUID := metaInvite.InvitationUUID
-	inviteSourceKey := metaInvite.InvitationSourcekey
+	// Get invitation UUID and invitation keys
+	invitationUUID := invitationMetaStruct.InvitationUUID
+	invitationSourceKey := invitationMetaStruct.InvitationSourcekey
 
-	// Get the invitation data from the datastore
-	inviteData, ok := userlib.DatastoreGet(inviteUUID)
+	// Get the invitation from the datastore to check the tag
+	inviteData, ok := userlib.DatastoreGet(invitationUUID)
 	if !ok {
 		return errors.New("invalid or missing invitation UUID")
 	}
-
 	// Unpack the invitation data
 	inviteMsg, inviteTag, err := UnpackValue(inviteData)
 	if err != nil {
 		return errors.New("failed to unpack invitation data")
 	}
-
 	// generate keys
-	_, inviteHMACKey, err := GetTwoHASHKDFKeys(inviteSourceKey, ENCRYPT, MAC)
+	_, inviteHMACKey, err := GetTwoHASHKDFKeys(invitationSourceKey, ENCRYPT, MAC)
 	if err != nil {
 		return err
 	}
@@ -870,40 +876,31 @@ func (userdata *User) AcceptInvitation(senderUsername string, invitationPtr uuid
 		return errors.New("integrity check failed: invite struct has been tampered with")
 	}
 
-	// create an access struct
-
+	// create an access struct and get the keys
 	accessStruct := Access{
-		InvitationUUID:      inviteUUID,
-		InvitationSourcekey: inviteSourceKey,
-		// need to add some list key in here
+		InvitationUUID:      invitationUUID,
+		InvitationSourcekey: invitationSourceKey,
 	}
-
-	// get the access struct source key
 	accessSourceKey, err := GetAccessKey(userdata.sourceKey, filename)
 	if err != nil {
 		return errors.New("access source key cannot be generated")
 	}
-
-	// generate the keys
 	accessEncKey, accessHMACKey, err := GetTwoHASHKDFKeys(accessSourceKey, ENCRYPT, MAC)
 	if err != nil {
 		return err
 	}
-	// Encrypt the access and create an HMAC tag
+
+	// Encrypt the access, HMAC, and store
 	accessMsg, accessTag, err := EncryptThenMac(accessStruct, accessEncKey, accessHMACKey)
 	if err != nil {
 		return errors.New("failed to package data for entry into DataStore")
 	}
-
-	// Store the encrypted invite and the HMAC tag in the datastore
 	accessData, err := GenerateUUIDVal(accessMsg, accessTag)
 	if err != nil {
 		return err
 	}
-
 	userlib.DatastoreSet(accessUUID, accessData)
 	return nil
-
 }
 
 func (userdata *User) RevokeAccess(filename string, recipientUsername string) error {
@@ -1015,6 +1012,7 @@ func (userdata *User) RevokeAccess(filename string, recipientUsername string) er
 	if err != nil {
 		return err
 	}
+
 	// Get value, unpack, check tag, and decrypt
 	invitationListValue, ok := userlib.DatastoreGet(invitationListUUID)
 	if !ok {
@@ -1033,52 +1031,31 @@ func (userdata *User) RevokeAccess(filename string, recipientUsername string) er
 		return errors.New("failed to decrypt invitation list struct")
 	}
 
-	// Check if the target user is in the invitation list
-	_, exists := invitationListStruct.Invitations[recipientUsername]
-	if !exists {
-		return errors.New("filename is not currently shared with recipientUsername")
+	// Get recipient invitation UUID
+	recipientInvitationUUID, err := GetInvitationUUID(userdata, recipientUsername, filename)
+	if err != nil {
+		return errors.New("error getting invitation uuid for recipient")
 	}
 
-	// Iterate over invitations list getting keys, decrypting, updating, and encrypting
+	// Check if the target user is in the invitation list
+	_, exists := invitationListStruct.Invitations[recipientInvitationUUID]
+	if !exists {
+		return errors.New("filename was not shared with recipientUsername")
+	}
+
+	// Delete recipient from invitationsList
 	invitations := invitationListStruct.Invitations
-	for user, uuid := range invitations {
-		if user == recipientUsername {
-			continue
-		}
-		invitationMetaSourceKey, err := GetInvitationSourceKey(userdata.sourceKey, user, filename)
-		if err != nil {
-			return errors.New("failed to get invitation source key")
-		}
-		invitationMetaEncryptKey, invitationMetaHMACKey, err := GetTwoHASHKDFKeys(invitationMetaSourceKey, ENCRYPT, MAC)
-		if err != nil {
-			return err
-		}
-		invitationMetaValue, ok := userlib.DatastoreGet(uuid)
-		if !ok {
-			return errors.New("failed to get invitation struct from the invitation")
-		}
+	delete(invitations, recipientInvitationUUID)
 
-		invitationMetaMsg, invitationMetaTag, err := UnpackValue(invitationMetaValue)
-		if err != nil {
-			return errors.New("failed to unpack invitation list")
-		}
-		err = CheckTag(invitationMetaMsg, invitationMetaTag, invitationMetaHMACKey)
-		if err != nil {
-			return errors.New("integrity check failed: detected unauthorized modifications")
-		}
-		invitationMetaStruct, err := DecryptInvitationMetaMsg(invitationMetaMsg, invitationMetaEncryptKey)
-		if err != nil {
-			return errors.New("failed to decrypt invitation list struct")
-		}
-
-		// Update invitation information and encrypt it again
-		invitationUUID := invitationMetaStruct.InvitationUUID
-		invitationSourceKey := invitationMetaStruct.InvitationSourcekey
+	// Iterate over invitations list getting keys, decrypting, updating, and encrypting
+	for invitationUUID, invitationSourceKey := range invitations {
+		// Get keys
 		invitationEncryptKey, invitationHMACKey, err := GetTwoHASHKDFKeys(invitationSourceKey, ENCRYPT, MAC)
 		if err != nil {
 			return err
 		}
 
+		// Update invitation information
 		invitationStruct := Invitation{metaUUID, metaSourceKey}
 		invitationMsg, invitationTag, err := EncryptThenMac(invitationStruct, invitationEncryptKey, invitationHMACKey)
 		if err != nil {
@@ -1091,30 +1068,26 @@ func (userdata *User) RevokeAccess(filename string, recipientUsername string) er
 		userlib.DatastoreSet(invitationUUID, invitationValue)
 	}
 
-	// Delete revoked user, update invitation list, encrypt it, and add it back to datastore
-	delete(invitations, recipientUsername)
-	updatedInvitationListStruct := invitationListStruct
-	updatedInvitationListStruct.Invitations = invitations
+	// Update invitation list, encrypt it, and add it back to datastore
+	invitationListStruct.Invitations = invitations
 
-	updatedInvitationListMsg, updatedInvitationListTag, err := EncryptThenMac(updatedInvitationListStruct, invitationListEncryptKey, invitationListHMACKey)
+	invitationListMsg, invitationListTag, err = EncryptThenMac(invitationListStruct, invitationListEncryptKey, invitationListHMACKey)
 	if err != nil {
 		return errors.New("failed to encrypt then mac updated invitation list struct")
 	}
-	updatedInvitationListValue, err := GenerateUUIDVal(updatedInvitationListMsg, updatedInvitationListTag)
+	invitationListValue, err = GenerateUUIDVal(invitationListMsg, invitationListTag)
 	if err != nil {
 		return errors.New("failed to generate then mac updated invitation list UUID value")
 	}
-	userlib.DatastoreSet(invitationListUUID, updatedInvitationListValue)
+	userlib.DatastoreSet(invitationListUUID, invitationListValue)
 
 	// Update owner struct, encrypt it, and add it back to the datastore
-	updatedOwnerStruct := accessStruct
-	updatedOwnerStruct.MetaUUID = metaUUID
-	updatedOwnerStruct.MetaSourcekey = metaSourceKey
-	updatedOwnerMsg, updatedOwnerTag, err := EncryptThenMac(updatedOwnerStruct, accessEncryptKey, accessHMACKey)
+	accessStruct.MetaSourcekey = metaSourceKey
+	accessMsg, accessTag, err = EncryptThenMac(accessStruct, accessEncryptKey, accessHMACKey)
 	if err != nil {
 		return errors.New("failed to encrypt and mac new owner struct")
 	}
-	updatedOwnerValue, err := GenerateUUIDVal(updatedOwnerMsg, updatedOwnerTag)
+	updatedOwnerValue, err := GenerateUUIDVal(accessMsg, accessTag)
 	if err != nil {
 		return errors.New("failed to get UUID value for owner")
 	}
@@ -1195,7 +1168,7 @@ func GetAccessUUID(user User, filename string) (UUID userlib.UUID, err error) {
 	return
 }
 
-func GetInviteUUID(owner *User, sharee, filename string) (UUID userlib.UUID, err error) {
+func GetInvitationUUID(owner *User, sharee, filename string) (UUID userlib.UUID, err error) {
 	// hash username and check error
 	invitebytes := []byte(owner.Username + filename + sharee)
 	invitehash, err := userlib.HashKDF(owner.sourceKey, invitebytes)
