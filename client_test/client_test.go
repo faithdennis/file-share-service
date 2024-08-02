@@ -681,7 +681,6 @@ var _ = Describe("Client Tests", func() {
 			userlib.DebugMsg("Creating invite.")
 			data, err := alice.CreateInvitation(aliceFile, "bob")
 			Expect(err).To(BeNil())
-			Expect(data).To(BeNil())
 
 			userlib.DebugMsg("Accepting invite.")
 			err = bob.AcceptInvitation("alice", data, aliceFile)
@@ -710,9 +709,8 @@ var _ = Describe("Client Tests", func() {
 			Expect(err).To(BeNil())
 
 			userlib.DebugMsg("Creating invite.")
-			data, err := alice.CreateInvitation(aliceFile, "bob")
+			_, err := alice.CreateInvitation(aliceFile, "bob")
 			Expect(err).To(BeNil())
-			Expect(data).To(BeNil())
 
 			userlib.DebugMsg("Revoking access.")
 			err = alice.RevokeAccess(aliceFile, "charles")
