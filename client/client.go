@@ -1288,8 +1288,8 @@ func DecryptAsynchMsg(msg []byte, pk userlib.PKEDecKey) (data interface{}, err e
 func GetRandomKey(user *User) (key []byte, err error) {
 	// generate new random key
 	sourcekey, salt := user.sourceKey, userlib.RandomBytes(LENGTH)
-	key, err = userlib.HashKDF(sourcekey, salt)
-
+	hashedkey, err := userlib.HashKDF(sourcekey, salt)
+	key = hashedkey[:16]
 	// check for error
 	if err != nil {
 		return nil, errors.New(strings.ToTitle("file not found"))
@@ -1303,7 +1303,8 @@ func GetAccessStruct(invitation userlib.UUID, sourcekey []byte) (access interfac
 }
 
 func GetAccessKey(sourcekey []byte, filename string) (key []byte, err error) {
-	key, err = userlib.HashKDF(sourcekey, []byte(filename))
+	hashedkey, err := userlib.HashKDF(sourcekey, []byte(filename))
+	key = hashedkey[:16]
 	if err != nil {
 		return nil, errors.New(strings.ToTitle("key creation failed"))
 	}
