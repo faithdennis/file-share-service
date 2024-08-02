@@ -475,8 +475,12 @@ func (userdata *User) LoadFile(filename string) (content []byte, err error) {
 	if err != nil {
 		return nil, errors.New("integrity check failed: Access Struct has been tampered with")
 	}
-	accessStruct, err := DecryptMsg(accessMsg, accessEncryptKey)
+	strct, err := DecryptMsg(accessMsg, accessEncryptKey)
 	if err != nil {
+		return nil, errors.New("could not decrypt Access Struct")
+	}
+	accessStruct, ok := strct.(Owner)
+	if !ok {
 		return nil, errors.New("could not decrypt Access Struct")
 	}
 
@@ -503,7 +507,7 @@ func (userdata *User) LoadFile(filename string) (content []byte, err error) {
 	if err != nil {
 		return nil, errors.New("integrity check failed: Meta struct has been tampered with")
 	}
-	strct, err := DecryptMsg(metaMsg, metaEncryptKey)
+	strct, err = DecryptMsg(metaMsg, metaEncryptKey)
 	if err != nil {
 		return nil, errors.New("failed to decrypt Meta struct")
 	}
