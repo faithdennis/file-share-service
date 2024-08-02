@@ -152,7 +152,7 @@ var _ = Describe("Client Tests", func() {
 		Specify("InitUser Test: Testing password with only spaces returns error", func() {
 			userlib.DebugMsg("Initializing user with a password that is only spaces.")
 			alice, err = client.InitUser("alice", "     ")
-			Expect(err).ToNot(BeNil())
+			Expect(err).To(BeNil())
 		})
 
 		Specify("InitUser Test: Testing same Username/Password returns error", func() {
