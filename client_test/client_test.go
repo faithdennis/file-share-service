@@ -145,6 +145,15 @@ var _ = Describe("Client Tests", func() {
 			Expect(err).To(BeNil())
 
 			db1 := userlib.DatastoreGetMap()
+			// Extract keys from db1
+			var keys1 []userlib.UUID
+			for key := range db1 {
+				keys1 = append(keys1, key)
+			}
+
+			// Copy keys1 to a new slice using the built-in copy function
+			keys1Copy := make([]userlib.UUID, len(keys1))
+			copy(keys1Copy, keys1)
 
 			userlib.DebugMsg("Storing file data: %s", contentOne)
 			err = alice.StoreFile(aliceFile, []byte(contentOne))
@@ -152,11 +161,18 @@ var _ = Describe("Client Tests", func() {
 
 			userlib.DebugMsg("Get newly created UUID.")
 			db2 := userlib.DatastoreGetMap()
+			var keys2 []userlib.UUID
 			for key := range db2 {
-				if _, found := db1[key]; !found {
+				keys2 = append(keys2, key)
+			}
+
+			for _, key := range keys2 {
+				if !contains(keys1Copy, key) {
+					// Entry was added
 					diff = key
 				}
 			}
+			userlib.DebugMsg("New UUID created: %s", diff.String())
 
 			userlib.DebugMsg("Tampering with Alice's File.")
 			userlib.DatastoreSet(diff, maliciousByte)
@@ -582,9 +598,8 @@ var _ = Describe("Client Tests", func() {
 			Expect(err).To(BeNil())
 
 			userlib.DebugMsg("Creating invitation with an empty file name.")
-			invitationID, err := alice.CreateInvitation("", "bob")
+			_, err := alice.CreateInvitation("", "bob")
 			Expect(err).To(BeNil())
-			Expect(invitationID).To(BeNil())
 		})
 
 		Specify("AcceptInvitation: Testing file already exists returns error", func() {

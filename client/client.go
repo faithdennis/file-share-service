@@ -874,6 +874,10 @@ func (userdata *User) RevokeAccess(filename string, recipientUsername string) er
 		return errors.New("could not decrypt Access Struct")
 	}
 
+	if !accessStruct.IsOwner {
+		return errors.New("only the owner can revoke access")
+	}
+
 	// Get meta UUID and keys
 	metaUUID, metaSourceKey, err := GetMetaUUIDAndSourceKey(accessStruct)
 	if err != nil {
@@ -960,6 +964,12 @@ func (userdata *User) RevokeAccess(filename string, recipientUsername string) er
 	invitationListStruct, err := DecryptInvitationListMsg(invitationListMsg, invitationListEncryptKey)
 	if err != nil {
 		return errors.New("failed to decrypt invitation list struct")
+	}
+
+	// Check if the target user is in the invitation list
+	_, exists := invitationListStruct.Invitations[recipientUsername]
+	if !exists {
+		return errors.New("filename is not currently shared with recipientUsername")
 	}
 
 	// Iterate over invitations list getting keys, decrypting, updating, and encrypting
