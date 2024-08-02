@@ -345,10 +345,6 @@ func (userdata *User) StoreFile(filename string, content []byte) (err error) {
 		startoffile := metaStruct.Start
 		fileSourceKey := metaStruct.FileSourcekey
 		// fileEncryptKey, fileHMACKey, err := GetTwoHASHKDFKeys(fileSourceKey, ENCRYPT, MAC)
-		if err != nil {
-			return errors.New("cailed to get keys for File")
-		}
-
 		// Add tampering file check
 
 		// Overwrite file and generate a new UUID for .Next of the file to update meta
@@ -1126,15 +1122,16 @@ func GetAsynchKeys() (pk userlib.PKEEncKey, sk userlib.PKEDecKey, signpriv userl
 // given secure source key this should produce fast secure keys
 func GetTwoHASHKDFKeys(sourcekey []byte, purpose1, purpose2 string) (key1, key2 []byte, err error) {
 	// generate keys and check errors
-	key1, err = userlib.HashKDF(sourcekey, []byte(purpose1))
+	key, err := userlib.HashKDF(sourcekey, []byte(purpose1))
 	if err != nil {
 		return nil, nil, errors.New(strings.ToTitle("key creation failed"))
 	}
-
-	key2, err = userlib.HashKDF(sourcekey, []byte(purpose2))
+	key1 = key[:16]
+	key, err = userlib.HashKDF(sourcekey, []byte(purpose2))
 	if err != nil {
 		return nil, nil, errors.New(strings.ToTitle("key creation failed"))
 	}
+	key2 = key[:16]
 	return
 }
 
