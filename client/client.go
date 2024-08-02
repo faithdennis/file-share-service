@@ -704,39 +704,36 @@ func (userdata *User) CreateInvitation(filename string, recipientUsername string
 	}
 
 	// Store the encrypted invite and the HMAC tag in the datastore
-	inviteData, err := GenerateUUIDVal(inviteMsg, inviteTag)
+	invitationValue, err := GenerateUUIDVal(inviteMsg, inviteTag)
 	if err != nil {
 		return uuid.Nil, err
 	}
 	invitationUUID := uuid.New()
-	userlib.DatastoreSet(invitationUUID, inviteData)
+	userlib.DatastoreSet(invitationUUID, invitationValue)
 
 	// create meta uuid
-	metaInviteUUID, err := GetInviteUUID(userdata, recipientUsername, filename)
+	invitationMetaUUID, err := GetInviteUUID(userdata, recipientUsername, filename)
 	if err != nil {
 		return uuid.Nil, err
 	}
 
 	// create meta invitation
-	metaInvitation := InvitationMeta{
+	invitationMeta := InvitationMeta{
 		InvitationUUID:      invitationUUID,
 		InvitationSourcekey: invitationSourceKey,
 	}
 
 	// encrypt + sign
-
-	// FAITH CHECK THIS
-	// THE RETURN VALUE FOR ONE OF THESE IS WRONG
-	metaInviteMsg, metaInviteSig, err := EncryptThenSign(metaInvitation, recipientUsername, userdata.Sigkey)
+	metaInviteMsg, metaInviteSig, err := EncryptThenSign(invitationMeta, recipientUsername, userdata.Sigkey)
 	if err != nil {
 		return uuid.Nil, err
 	}
-	metaInviteData, err := GenerateUUIDVal(metaInviteMsg, metaInviteSig)
+	invitationMetaValue, err := GenerateUUIDVal(metaInviteMsg, metaInviteSig)
 	if err != nil {
 		return uuid.Nil, err
 	}
 	// IDK HOW TO STORE THIS?
-	userlib.DatastoreSet(metaInviteUUID, metaInviteData)
+	userlib.DatastoreSet(invitationMetaUUID, invitationMetaValue)
 	return metaInviteUUID, nil
 }
 
@@ -1137,8 +1134,8 @@ func GetInviteUUID(owner *User, sharee, filename string) (UUID userlib.UUID, err
 func GenerateUUIDVal(msg, tag []byte) (value []byte, err error) {
 	// create map
 	Map := map[string][]byte{
-		"msg": msg,
-		"tag": tag,
+		"Msg": msg,
+		"Tag": tag,
 	}
 
 	// generate byte array
@@ -1158,7 +1155,7 @@ func UnpackValue(value []byte) (msg, tag []byte, err error) {
 	if err != nil {
 		return nil, nil, errors.New(strings.ToTitle("unmarshal failed"))
 	}
-	msg, tag = unpackedData["msg"], unpackedData["tag"]
+	msg, tag = unpackedData["Msg"], unpackedData["Tag"]
 	return
 }
 
@@ -1200,7 +1197,7 @@ func EncryptThenMacAccess(txt Access, key1, key2 []byte) (msg, tag []byte, err e
 	return
 }
 
-func EncryptThenSign(txt interface{}, user string, sk userlib.DSSignKey) (msg, sig []byte, err error) {
+func EncryptThenSign(txt InvitationMeta, user string, sk userlib.DSSignKey) (msg, sig []byte, err error) {
 	// convert to byte array, check for error
 	plaintext, err := json.Marshal(txt)
 	if err != nil {

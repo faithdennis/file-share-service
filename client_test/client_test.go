@@ -582,9 +582,9 @@ var _ = Describe("Client Tests", func() {
 			Expect(err).To(BeNil())
 
 			userlib.DebugMsg("Creating invitation with an empty file name.")
-			invitationID, err := alice.CreateInvitation("", "bob")
+
+			_, err := alice.CreateInvitation("", "bob")
 			Expect(err).To(BeNil())
-			Expect(invitationID).To(BeNil())
 		})
 
 		Specify("AcceptInvitation: Testing file already exists returns error", func() {
