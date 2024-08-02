@@ -1293,7 +1293,7 @@ func GetRandomKey(user *User) (key []byte, err error) {
 	// generate new random key
 	sourcekey, salt := user.sourceKey, userlib.RandomBytes(LENGTH)
 	hashedkey, err := userlib.HashKDF(sourcekey, salt)
-	key = hashedkey[:16]
+	key = hashedkey[:LENGTH]
 	// check for error
 	if err != nil {
 		return nil, errors.New(strings.ToTitle("file not found"))
@@ -1308,7 +1308,7 @@ func GetAccessStruct(invitation userlib.UUID, sourcekey []byte) (access interfac
 
 func GetAccessKey(sourcekey []byte, filename string) (key []byte, err error) {
 	hashedkey, err := userlib.HashKDF(sourcekey, []byte(filename))
-	key = hashedkey[:16]
+	key = hashedkey[:LENGTH]
 	if err != nil {
 		return nil, errors.New(strings.ToTitle("key creation failed"))
 	}
@@ -1426,7 +1426,8 @@ func UnpackCheckTagAndDecryptFile(fileUUID userlib.UUID, fileEncryptKey, fileHMA
 }
 
 func GetInvitationSourceKey(sourceKey []byte, user, filename string) (invitationSourceKey []byte, err error) {
-	invitationSourceKey, err = userlib.HashKDF(sourceKey, []byte(user+ACCESS+filename))
+	hashedinvitationSourceKey, err := userlib.HashKDF(sourceKey, []byte(user+ACCESS+filename))
+	invitationSourceKey = hashedinvitationSourceKey[:16]
 	if err != nil {
 		return nil, errors.New("failed to get invitation li")
 	}
