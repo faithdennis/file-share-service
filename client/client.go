@@ -124,17 +124,21 @@ type User struct {
 	sourceKey []byte
 }
 
-type Owner struct {
-	MetaUUID       userlib.UUID
-	MetaSourcekey  []byte // used to generate meta keys
-	InvitationList userlib.UUID
-	ListKey        []byte // used to generate invitation list keys
+type Access struct {
+	MetaUUID            userlib.UUID
+	MetaSourcekey       []byte // used to generate meta keys
+	InvitationUUID      userlib.UUID
+	InvitationSourcekey []byte // used to generate invitation keys
+	InvitationList      userlib.UUID
+	ListKey             []byte // used to generate invitation list keys
+	isOwner             bool
 }
 
+/**
 type Access struct {
 	InvitationUUID      userlib.UUID
 	InvitationSourcekey []byte // used to generate invitation keys
-}
+} **/
 
 type InvitationList struct {
 	Invitations map[string]userlib.UUID // username - UUID
@@ -303,7 +307,7 @@ func (userdata *User) StoreFile(filename string, content []byte) (err error) {
 		if err != nil {
 			return errors.New("integrity check failed: Access Struct has been tampered with")
 		}
-		accessStruct, err := DecryptMsg(accessMsg, accessEncryptKey)
+		accessStruct, err := DecryptAccessMsg(accessMsg, accessEncryptKey)
 		if err != nil {
 			return errors.New("could not decrypt Access Struct")
 		}
@@ -331,14 +335,9 @@ func (userdata *User) StoreFile(filename string, content []byte) (err error) {
 		if err != nil {
 			return errors.New("integrity check failed: Meta struct has been tampered with")
 		}
-		strct, err := DecryptMsg(metaMsg, metaEncryptKey)
+		metaStruct, err := DecryptMetaMsg(metaMsg, metaEncryptKey)
 		if err != nil {
 			return errors.New("failed to decrypt Meta struct")
-		}
-
-		metaStruct, ok := strct.(Meta)
-		if !ok {
-			return errors.New("can't cast")
 		}
 
 		// Get start and end of files and keys for file
@@ -366,83 +365,64 @@ func (userdata *User) StoreFile(filename string, content []byte) (err error) {
 		userlib.DatastoreSet(metaUUID, metaValue)
 
 	} else {
-		// IF DOESNT EXIST
-		// generate new file UUID and file sourcekey
+		// Access does not exist. user must create a new file. Generate new file UUID and file keys
 		fileUUID := uuid.New()
 		fileSourceKey, err := GetRandomKey(userdata)
 		if err != nil {
 			return errors.New("failed to get file sourcekey")
 		}
 
-		// add file to database
+		// Add file to database
 		nextFileUUID, err := AddFileToDatabase(fileUUID, fileSourceKey, content)
 		if err != nil {
 			return errors.New("failed to add file to datastore")
 		}
 
-		// generate new meta UUID and meta sourcekey
+		// Generate meta UUID and keys
 		metaUUID := uuid.New()
 		metaSourceKey, err := GetRandomKey(userdata)
 		if err != nil {
 			return errors.New("failed to get meta sourcekey")
 		}
-
-		// generate encryption and HMAC keys
 		metaEncryptKey, metaHMACKey, err := GetTwoHASHKDFKeys(metaSourceKey, ENCRYPT, MAC)
 		if err != nil {
 			return errors.New("failed to get file HDKF")
 		}
 
-		// Construct the metadata struct (UUIDs and keys)
-		fileMeta := Meta{fileUUID, nextFileUUID, fileSourceKey}
-
-		// Encrypt the metadata and create an HMAC tag
-		metaMsg, metaTag, err := EncryptThenMac(fileMeta, metaEncryptKey, metaHMACKey)
+		// Construct the metadata struct (UUIDs and keys), encrypt, mac, and store
+		metaStruct := Meta{fileUUID, nextFileUUID, fileSourceKey}
+		metaMsg, metaTag, err := EncryptThenMac(metaStruct, metaEncryptKey, metaHMACKey)
 		if err != nil {
 			return errors.New("failed to package data for entry into DataStore")
 		}
-
-		// Store the encrypted metadata and the HMAC tag in the datastore
-		metaData, err := GenerateUUIDVal(metaMsg, metaTag)
+		metaValue, err := GenerateUUIDVal(metaMsg, metaTag)
 		if err != nil {
 			return err
 		}
-		userlib.DatastoreSet(metaUUID, metaData)
+		userlib.DatastoreSet(metaUUID, metaValue)
 
-		ownerAccessStruct := Owner{
-			MetaUUID:       metaUUID,
-			MetaSourcekey:  metaSourceKey,
-			InvitationList: uuid.New(),
-			ListKey:        nil, //NEEDS TO BE FIXED
-		}
-
-		accessSourceKey, err := GetAccessKey(userdata.sourceKey, filename)
-		if err != nil {
-			return err
-		}
-
-		// get access keys
-		accessEncryptKey, accessHMACKey, err := GetTwoHASHKDFKeys(accessSourceKey, ENCRYPT, MAC)
-		if err != nil {
-			return err
+		// Create the owner struct
+		ownerStruct := Access{
+			MetaUUID:      metaUUID,
+			MetaSourcekey: metaSourceKey,
+			ListKey:       nil,
+			isOwner:       true,
 		}
 
 		// access encrypt then mac
-		accessMsg, accessTag, err := EncryptThenMac(ownerAccessStruct, accessEncryptKey, accessHMACKey)
+		ownerMsg, ownerTag, err := EncryptThenMacAccess(ownerStruct, accessEncryptKey, accessHMACKey)
 		if err != nil {
 			return err
 		}
 
 		// package the values
-		accessUUIDVal, err := GenerateUUIDVal(accessMsg, accessTag)
+		ownerValue, err := GenerateUUIDVal(ownerMsg, ownerTag)
 		if err != nil {
 			return err
 		}
-		userlib.DatastoreSet(accessUUID, accessUUIDVal)
-		return nil
+		userlib.DatastoreSet(accessUUID, ownerValue)
 	}
-
-	return
+	return nil
 }
 
 func (userdata *User) LoadFile(filename string) (content []byte, err error) {
@@ -475,19 +455,15 @@ func (userdata *User) LoadFile(filename string) (content []byte, err error) {
 	if err != nil {
 		return nil, errors.New("integrity check failed: Access Struct has been tampered with")
 	}
-	strct, err := DecryptMsg(accessMsg, accessEncryptKey)
+	accessStruct, err := DecryptAccessMsg(accessMsg, accessEncryptKey)
 	if err != nil {
-		return nil, errors.New("could not decrypt Access Struct")
-	}
-	accessStruct, ok := strct.(Owner)
-	if !ok {
-		return nil, errors.New("could not decrypt Access Struct")
+		return nil, errors.New("could not decrypt access message")
 	}
 
 	// Get meta UUID and keys
 	metaUUID, metaSourceKey, err := GetMetaUUIDAndSourceKey(accessStruct)
 	if err != nil {
-		return nil, errors.New("could not get Meta UUID and soucekey")
+		return nil, errors.New("could not get Meta UUID and soucekey") // this will error if they do not have access
 	}
 	metaEncryptKey, metaHMACKey, err := GetTwoHASHKDFKeys(metaSourceKey, ENCRYPT, MAC)
 	if err != nil {
@@ -507,13 +483,9 @@ func (userdata *User) LoadFile(filename string) (content []byte, err error) {
 	if err != nil {
 		return nil, errors.New("integrity check failed: Meta struct has been tampered with")
 	}
-	strct, err = DecryptMsg(metaMsg, metaEncryptKey)
+	metaStruct, err := DecryptMetaMsg(metaMsg, metaEncryptKey)
 	if err != nil {
 		return nil, errors.New("failed to decrypt Meta struct")
-	}
-	metaStruct, ok := strct.(Meta)
-	if !ok {
-		return nil, errors.New("failed to cast as meta struct")
 	}
 
 	// Get start and end of files and keys for file
@@ -545,28 +517,16 @@ func (userdata *User) LoadFile(filename string) (content []byte, err error) {
 		if err != nil {
 			return nil, errors.New("integrity check failed: File has unauthorized modifications")
 		}
-		strct, err := DecryptMsg(fileMsg, fileEncryptKey)
+		fileStruct, err := DecryptFileMsg(fileMsg, fileEncryptKey)
 		if err != nil {
 			return nil, errors.New("File could not be decrypted")
 		}
-
-		fileStruct, ok := strct.(File)
-		if !ok {
-			return nil, errors.New("failed to cast as meta struct")
-		}
-
 		fileContent = fileStruct.Contents
 
 		// Append this file to entire message
 		fullContent = append(fullContent, fileContent...)
 
-		// Get next UUID
-		var currentFile File
-		err = json.Unmarshal(fileContent, &currentFile)
-		if err != nil {
-			return nil, err
-		}
-		currentUUID = currentFile.Next
+		currentUUID = fileStruct.Next
 	}
 
 	return fullContent, nil
@@ -602,7 +562,7 @@ func (userdata *User) AppendToFile(filename string, content []byte) error {
 	if err != nil {
 		return errors.New("integrity check failed: Access Struct has been tampered with")
 	}
-	accessStruct, err := DecryptMsg(accessMsg, accessEncryptKey)
+	accessStruct, err := DecryptAccessMsg(accessMsg, accessEncryptKey)
 	if err != nil {
 		return errors.New("could not decrypt Access Struct")
 	}
@@ -610,7 +570,7 @@ func (userdata *User) AppendToFile(filename string, content []byte) error {
 	// Get meta UUID and keys
 	metaUUID, metaSourceKey, err := GetMetaUUIDAndSourceKey(accessStruct)
 	if err != nil {
-		return errors.New("could not get Meta UUID and soucekey")
+		return errors.New("could not get Meta UUID and soucekey") // this will error if they do not have accesss
 	}
 	metaEncryptKey, metaHMACKey, err := GetTwoHASHKDFKeys(metaSourceKey, ENCRYPT, MAC)
 	if err != nil {
@@ -630,13 +590,9 @@ func (userdata *User) AppendToFile(filename string, content []byte) error {
 	if err != nil {
 		return errors.New("integrity check failed: Meta struct has been tampered with")
 	}
-	strct, err := DecryptMsg(metaMsg, metaEncryptKey)
+	metaStruct, err := DecryptMetaMsg(metaMsg, metaEncryptKey)
 	if err != nil {
 		return errors.New("failed to decrypt Meta struct")
-	}
-	metaStruct, ok := strct.(Meta)
-	if !ok {
-		return errors.New("failed to cast as meta struct")
 	}
 
 	fileSourceKey := metaStruct.FileSourcekey
@@ -666,7 +622,7 @@ func (userdata *User) AppendToFile(filename string, content []byte) error {
 
 func (userdata *User) CreateInvitation(filename string, recipientUsername string) (
 	invitationPtr uuid.UUID, err error) {
-
+	// file
 	// check if user exits by seeing if their key exists in public keystore
 	_, ok := userlib.KeystoreGet(recipientUsername + " public key")
 	if !ok {
@@ -708,7 +664,7 @@ func (userdata *User) CreateInvitation(filename string, recipientUsername string
 	if err != nil {
 		return uuid.Nil, errors.New("integrity check failed: Access Struct has been tampered with")
 	}
-	accessStruct, err := DecryptMsg(accessMsg, accessEncryptKey)
+	accessStruct, err := DecryptAccessMsg(accessMsg, accessEncryptKey)
 	if err != nil {
 		return uuid.Nil, errors.New("could not decrypt Access Struct")
 	}
@@ -807,14 +763,9 @@ func (userdata *User) AcceptInvitation(senderUsername string, invitationPtr uuid
 
 	// Decrypt the invitation meta via asych
 
-	strct, err := DecryptAsynchMsg(inviteMsg, userdata.RSAkey)
+	metaInvite, err := DecryptAsynchMsg(inviteMsg, userdata.RSAkey)
 	if err != nil {
 		return errors.New("failed to decrypt invitation")
-	}
-
-	metaInvite, ok := strct.(InvitationMeta)
-	if !ok {
-		return errors.New("failed to cast as meta struct")
 	}
 
 	// go to invite itself
@@ -882,6 +833,9 @@ func (userdata *User) AcceptInvitation(senderUsername string, invitationPtr uuid
 func (userdata *User) RevokeAccess(filename string, recipientUsername string) error {
 	// Get the access UUID and check if it exists
 	accessUUID, err := GetAccessUUID(*userdata, filename)
+	if err != nil {
+		return errors.New("failed to get access sourcekey")
+	}
 	accessValue, ok := userlib.DatastoreGet(accessUUID)
 	if !ok {
 		return errors.New("file does not exist in user namespace")
@@ -906,7 +860,7 @@ func (userdata *User) RevokeAccess(filename string, recipientUsername string) er
 	if err != nil {
 		return errors.New("integrity check failed: Access Struct has been tampered with")
 	}
-	accessStruct, err := DecryptMsg(accessMsg, accessEncryptKey)
+	accessStruct, err := DecryptAccessMsg(accessMsg, accessEncryptKey)
 	if err != nil {
 		return errors.New("could not decrypt Access Struct")
 	}
@@ -975,8 +929,8 @@ func (userdata *User) RevokeAccess(filename string, recipientUsername string) er
 	userlib.DatastoreSet(metaUUID, metaValue)
 
 	// Get invitationList struct location and keys
-	invitationListUUID := accessStruct.(Owner).InvitationList
-	invitationListKey := accessStruct.(Owner).ListKey
+	invitationListUUID := accessStruct.InvitationList
+	invitationListKey := accessStruct.ListKey
 	invitationListEncryptKey, invitationListHMACKey, err := GetTwoHASHKDFKeys(invitationListKey, ENCRYPT, MAC)
 	if err != nil {
 		return err
@@ -994,13 +948,13 @@ func (userdata *User) RevokeAccess(filename string, recipientUsername string) er
 	if err != nil {
 		return errors.New("integrity check failed: detected unauthorized modifications")
 	}
-	invitationListStruct, err := DecryptMsg(invitationListMsg, invitationListEncryptKey)
+	invitationListStruct, err := DecryptInvitationListMsg(invitationListMsg, invitationListEncryptKey)
 	if err != nil {
 		return errors.New("failed to decrypt invitation list struct")
 	}
 
 	// Iterate over invitations list getting keys, decrypting, updating, and encrypting
-	invitations := invitationListStruct.(InvitationList).Invitations
+	invitations := invitationListStruct.Invitations
 	for user, uuid := range invitations {
 		if user == recipientUsername {
 			continue
@@ -1026,14 +980,14 @@ func (userdata *User) RevokeAccess(filename string, recipientUsername string) er
 		if err != nil {
 			return errors.New("integrity check failed: detected unauthorized modifications")
 		}
-		invitationMetaStruct, err := DecryptMsg(invitationMetaMsg, invitationMetaEncryptKey)
+		invitationMetaStruct, err := DecryptInvitationMetaMsg(invitationMetaMsg, invitationMetaEncryptKey)
 		if err != nil {
 			return errors.New("failed to decrypt invitation list struct")
 		}
 
 		// Update invitation information and encrypt it again
-		invitationUUID := invitationMetaStruct.(InvitationMeta).InvitationUUID
-		invitationSourceKey := invitationMetaStruct.(InvitationMeta).InvitationSourcekey
+		invitationUUID := invitationMetaStruct.InvitationUUID
+		invitationSourceKey := invitationMetaStruct.InvitationSourcekey
 		invitationEncryptKey, invitationHMACKey, err := GetTwoHASHKDFKeys(invitationSourceKey, ENCRYPT, MAC)
 		if err != nil {
 			return err
@@ -1053,7 +1007,7 @@ func (userdata *User) RevokeAccess(filename string, recipientUsername string) er
 
 	// Delete revoked user, update invitation list, encrypt it, and add it back to datastore
 	delete(invitations, recipientUsername)
-	updatedInvitationListStruct := invitationListStruct.(InvitationList)
+	updatedInvitationListStruct := invitationListStruct
 	updatedInvitationListStruct.Invitations = invitations
 
 	updatedInvitationListMsg, updatedInvitationListTag, err := EncryptThenMac(updatedInvitationListStruct, invitationListEncryptKey, invitationListHMACKey)
@@ -1067,7 +1021,7 @@ func (userdata *User) RevokeAccess(filename string, recipientUsername string) er
 	userlib.DatastoreSet(invitationListUUID, updatedInvitationListValue)
 
 	// Update owner struct, encrypt it, and add it back to the datastore
-	updatedOwnerStruct := accessStruct.(Owner)
+	updatedOwnerStruct := accessStruct
 	updatedOwnerStruct.MetaUUID = metaUUID
 	updatedOwnerStruct.MetaSourcekey = metaSourceKey
 	updatedOwnerMsg, updatedOwnerTag, err := EncryptThenMac(updatedOwnerStruct, accessEncryptKey, accessHMACKey)
@@ -1135,7 +1089,7 @@ func GetTwoHASHKDFKeys(sourcekey []byte, purpose1, purpose2 string) (key1, key2 
 	if err != nil {
 		return nil, nil, errors.New(strings.ToTitle("key creation failed"))
 	}
-	key2 = key[:16]
+	key2 = key[:LENGTH]
 	return
 }
 
@@ -1218,6 +1172,25 @@ func EncryptThenMac(txt interface{}, key1, key2 []byte) (msg, tag []byte, err er
 	return
 }
 
+func EncryptThenMacAccess(txt Access, key1, key2 []byte) (msg, tag []byte, err error) {
+	// convert text to bytes and check for error
+	plaintext, err := json.Marshal(txt)
+	if err != nil {
+		return nil, nil, errors.New(strings.ToTitle("marshal failed"))
+	}
+
+	// encrypt and mac
+	rndbytes := userlib.RandomBytes(LENGTH)
+	msg = userlib.SymEnc(key1, rndbytes, plaintext)
+	tag, err = userlib.HMACEval(key2, msg)
+
+	// check for error and return
+	if err != nil {
+		return nil, nil, errors.New(strings.ToTitle("hmac failed"))
+	}
+	return
+}
+
 func EncryptThenSign(txt interface{}, user string, sk userlib.DSSignKey) (msg, sig []byte, err error) {
 	// convert to byte array, check for error
 	plaintext, err := json.Marshal(txt)
@@ -1265,7 +1238,7 @@ func CheckSignature(msg, sig []byte, user string) (err error) {
 	return
 }
 
-func DecryptMsg(msg, key1 []byte) (data interface{}, err error) {
+func DecryptFileMsg(msg, key1 []byte) (data File, err error) {
 	// decrypt msg
 	plaintext := userlib.SymDec(key1, msg)
 
@@ -1274,17 +1247,62 @@ func DecryptMsg(msg, key1 []byte) (data interface{}, err error) {
 	return
 }
 
-func DecryptAsynchMsg(msg []byte, pk userlib.PKEDecKey) (data interface{}, err error) {
+func DecryptAccessMsg(msg, key1 []byte) (data Access, err error) {
+	// decrypt msg
+	plaintext := userlib.SymDec(key1, msg)
+
+	// unmarshal data to get original struct
+	err = json.Unmarshal(plaintext, &data)
+	return
+}
+
+func DecryptMetaMsg(msg, key1 []byte) (data Meta, err error) {
+	// decrypt msg
+	plaintext := userlib.SymDec(key1, msg)
+
+	// unmarshal data to get original struct
+	err = json.Unmarshal(plaintext, &data)
+	return
+}
+
+func DecryptInvitationMsg(msg, key1 []byte) (data Invitation, err error) {
+	// decrypt msg
+	plaintext := userlib.SymDec(key1, msg)
+
+	// unmarshal data to get original struct
+	err = json.Unmarshal(plaintext, &data)
+	return
+}
+
+func DecryptInvitationListMsg(msg, key1 []byte) (data InvitationList, err error) {
+	// decrypt msg
+	plaintext := userlib.SymDec(key1, msg)
+
+	// unmarshal data to get original struct
+	err = json.Unmarshal(plaintext, &data)
+	return
+}
+
+func DecryptInvitationMetaMsg(msg, key1 []byte) (data InvitationMeta, err error) {
+	// decrypt msg
+	plaintext := userlib.SymDec(key1, msg)
+
+	// unmarshal data to get original struct
+	err = json.Unmarshal(plaintext, &data)
+	return
+}
+
+func DecryptAsynchMsg(msg []byte, pk userlib.PKEDecKey) (data InvitationMeta, err error) {
 	// decrypt msg
 	plaintext, err := userlib.PKEDec(pk, msg)
 	if err != nil {
-		return nil, errors.New(strings.ToTitle("decryption failed"))
+		return InvitationMeta{}, errors.New(strings.ToTitle("decryption failed"))
 	}
 
 	// unmarshal data to get original struct and check for error
 	err = json.Unmarshal(plaintext, &data)
 	if err != nil {
-		return nil, errors.New(strings.ToTitle("unmarshalling failed"))
+		return InvitationMeta{}, errors.New(strings.ToTitle("unmarshalling failed"))
 	}
 	return
 }
@@ -1302,7 +1320,7 @@ func GetRandomKey(user *User) (key []byte, err error) {
 }
 
 func GetAccessStruct(invitation userlib.UUID, sourcekey []byte) (access interface{}) {
-	access = Access{invitation, sourcekey}
+	access = Access{InvitationUUID: invitation, InvitationSourcekey: sourcekey, isOwner: false}
 	return
 }
 
@@ -1350,13 +1368,9 @@ func isAccessType(i interface{}) bool {
 	return reflect.TypeOf(i) == reflect.TypeOf(Access{})
 }
 
-func GetMetaUUIDAndSourceKey(strct interface{}) (metaUUID userlib.UUID, metaSourceKey []byte, err error) {
+func GetMetaUUIDAndSourceKey(accessStruct Access) (metaUUID userlib.UUID, metaSourceKey []byte, err error) {
 	// check if user obtained access through invitation
-	if isAccessType(strct) {
-		accessStruct, ok := strct.(Access)
-		if !ok {
-			return uuid.New(), nil, errors.New("failed to cast access struct")
-		}
+	if !accessStruct.isOwner {
 		// get UUID and keys for invitation
 		invitationUUID := accessStruct.InvitationUUID
 		invitationSourceKey := accessStruct.InvitationSourcekey
@@ -1370,31 +1384,23 @@ func GetMetaUUIDAndSourceKey(strct interface{}) (metaUUID userlib.UUID, metaSour
 		if !ok {
 			return uuid.Nil, nil, errors.New("invitation does not exist")
 		}
-		invitationMsg, invitaionTag, err := UnpackValue(invitationValue)
+		invitationMsg, invitationTag, err := UnpackValue(invitationValue)
 		if err != nil {
 			return uuid.Nil, nil, errors.New("could not unpack invitation value")
 		}
-		err = CheckTag(invitationMsg, invitaionTag, invitationHMACKey)
+		err = CheckTag(invitationMsg, invitationTag, invitationHMACKey)
 		if err != nil {
 			return uuid.Nil, nil, errors.New("integrity check failed: Invitation struct has unauthorized modifications")
 		}
-		strct, err = DecryptMsg(invitationMsg, invitationEncryptKey)
+		invitationStruct, err := DecryptInvitationMsg(invitationMsg, invitationEncryptKey)
 		if err != nil {
 			return uuid.Nil, nil, errors.New("could not decrypt Invitation Struct")
-		}
-		invitationStruct, ok := strct.(Invitation)
-		if !ok {
-			return uuid.New(), nil, errors.New("failed to create invitationStruct")
 		}
 
 		// get UUID and sourcekey of meta file
 		metaUUID = invitationStruct.MetaUUID
 		metaSourceKey = invitationStruct.MetaSourcekey
 	} else {
-		accessStruct, ok := strct.(Owner)
-		if !ok {
-			return uuid.New(), nil, errors.New("failed to cast owner struct")
-		}
 		metaUUID = accessStruct.MetaUUID
 		metaSourceKey = accessStruct.MetaSourcekey
 	}
@@ -1414,20 +1420,16 @@ func UnpackCheckTagAndDecryptFile(fileUUID userlib.UUID, fileEncryptKey, fileHMA
 	if err != nil {
 		return File{}, errors.New("integrity check failed: File has unauthorized modifications")
 	}
-	strct, err := DecryptMsg(fileMsg, fileEncryptKey)
+	fileStruct, err = DecryptFileMsg(fileMsg, fileEncryptKey)
 	if err != nil {
 		return File{}, errors.New("file could not be decrypted")
-	}
-	fileStruct, ok = strct.(File)
-	if !ok {
-		return File{}, errors.New("file struct could not cast")
 	}
 	return
 }
 
 func GetInvitationSourceKey(sourceKey []byte, user, filename string) (invitationSourceKey []byte, err error) {
 	hashedinvitationSourceKey, err := userlib.HashKDF(sourceKey, []byte(user+ACCESS+filename))
-	invitationSourceKey = hashedinvitationSourceKey[:16]
+	invitationSourceKey = hashedinvitationSourceKey[:LENGTH]
 	if err != nil {
 		return nil, errors.New("failed to get invitation li")
 	}
