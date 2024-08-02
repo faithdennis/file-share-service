@@ -131,7 +131,7 @@ type Access struct {
 	InvitationSourcekey []byte // used to generate invitation keys
 	InvitationList      userlib.UUID
 	ListKey             []byte // used to generate invitation list keys
-	isOwner             bool
+	IsOwner             bool
 }
 
 /**
@@ -406,7 +406,11 @@ func (userdata *User) StoreFile(filename string, content []byte) (err error) {
 			MetaUUID:      metaUUID,
 			MetaSourcekey: metaSourceKey,
 			ListKey:       nil,
-			isOwner:       true,
+			IsOwner:       true,
+		}
+
+		if !ownerStruct.IsOwner {
+			return errors.New("error making struct")
 		}
 
 		// access encrypt then mac
@@ -1320,7 +1324,7 @@ func GetRandomKey(user *User) (key []byte, err error) {
 }
 
 func GetAccessStruct(invitation userlib.UUID, sourcekey []byte) (access interface{}) {
-	access = Access{InvitationUUID: invitation, InvitationSourcekey: sourcekey, isOwner: false}
+	access = Access{InvitationUUID: invitation, InvitationSourcekey: sourcekey, IsOwner: false}
 	return
 }
 
@@ -1370,7 +1374,8 @@ func isAccessType(i interface{}) bool {
 
 func GetMetaUUIDAndSourceKey(accessStruct Access) (metaUUID userlib.UUID, metaSourceKey []byte, err error) {
 	// check if user obtained access through invitation
-	if !accessStruct.isOwner {
+	userOwnsFile := accessStruct.IsOwner
+	if !userOwnsFile {
 		// get UUID and keys for invitation
 		invitationUUID := accessStruct.InvitationUUID
 		invitationSourceKey := accessStruct.InvitationSourcekey
