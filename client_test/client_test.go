@@ -12,6 +12,7 @@ import (
 	_ "strings"
 	"testing"
 
+	"github.com/google/uuid"
 	_ "github.com/google/uuid"
 
 	// A "dot" import is used here so that the functions in the ginko and gomega
@@ -229,6 +230,68 @@ var _ = Describe("Client Tests", func() {
 			userlib.DebugMsg("Attempting to append to tampered file.")
 			err = alice.AppendToFile("aliceFile.txt", []byte(" Appended text."))
 			Expect(err).ToNot(BeNil())
+		})
+
+		Specify("Integrity Test: Testing User.CreateInvitation", func() {
+
+			userlib.DebugMsg("Initializing user Alice.")
+			alice, err := client.InitUser("alice", defaultPassword)
+			Expect(err).To(BeNil())
+
+			userlib.DebugMsg("Initializing user Bob.")
+			bob, err := client.InitUser("bob", defaultPassword)
+			Expect(err).To(BeNil())
+
+			userlib.DebugMsg("Storing file data for Alice.")
+			err = alice.StoreFile("aliceFile.txt", []byte("Sensitive Data"))
+			Expect(err).To(BeNil())
+
+			userlib.DebugMsg("Creating invitation from Alice to Bob.")
+			invitationUUID, err := alice.CreateInvitation("aliceFile.txt", "bob")
+			Expect(err).To(BeNil())
+			Expect(invitationUUID).ToNot(Equal(uuid.Nil))
+
+			userlib.DebugMsg("Tampered with invitation UUID: %s", invitationUUID.String())
+			userlib.DatastoreSet(invitationUUID, maliciousByte)
+
+			userlib.DebugMsg("Attempting to accept tampered invitation.")
+			err = bob.AcceptInvitation("alice", invitationUUID, "aliceFile.txt")
+			Expect(err).ToNot(BeNil())
+		})
+
+		Specify("Integrity Test: Testing User.AcceptInvitation", func() {
+
+			userlib.DebugMsg("Initializing user Alice.")
+			alice, err := client.InitUser("alice", defaultPassword)
+			Expect(err).To(BeNil())
+
+			userlib.DebugMsg("Initializing user Bob.")
+			bob, err := client.InitUser("bob", defaultPassword)
+			Expect(err).To(BeNil())
+
+			userlib.DebugMsg("Storing file data for Alice.")
+			err = alice.StoreFile("aliceFile.txt", []byte("Sensitive Data"))
+			Expect(err).To(BeNil())
+
+			userlib.DebugMsg("Creating invitation from Alice to Bob.")
+			invitationUUID, err := alice.CreateInvitation("aliceFile.txt", "bob")
+			Expect(err).To(BeNil())
+			Expect(invitationUUID).ToNot(Equal(uuid.Nil))
+			invitationData, _ := userlib.DatastoreGet(invitationUUID)
+
+			userlib.DebugMsg("Tampered with invitation UUID: %s", invitationUUID.String())
+			userlib.DatastoreSet(invitationUUID, maliciousByte)
+
+			userlib.DebugMsg("Attempting to accept tampered invitation.")
+			err = bob.AcceptInvitation("alice", invitationUUID, "aliceFile.txt")
+			Expect(err).ToNot(BeNil())
+
+			// Restore original invitation data
+			userlib.DatastoreSet(invitationUUID, invitationData)
+
+			userlib.DebugMsg("Attempting to accept valid invitation after restoring.")
+			err = bob.AcceptInvitation("alice", invitationUUID, "aliceFile.txt")
+			Expect(err).To(BeNil())
 		})
 	})
 
@@ -522,12 +585,6 @@ var _ = Describe("Client Tests", func() {
 			err = alice.StoreFile("testfile", []byte("initial content"))
 			Expect(err).To(BeNil())
 
-			userlib.DebugMsg("Measuring bandwidth for appending 1 byte.")
-			bandwidth1Byte := measureBandwidth(func() {
-				err = alice.AppendToFile("testfile", []byte("a"))
-				Expect(err).To(BeNil())
-			})
-
 			var previousIterationBandwidth int
 
 			// Doing multiple appends
@@ -545,15 +602,47 @@ var _ = Describe("Client Tests", func() {
 				}
 
 			}
+		})
 
-			userlib.DebugMsg("Measuring bandwidth for appending 0 bytes.")
-			bandwidth0Bytes := measureBandwidth(func() {
-				err = alice.AppendToFile("testfile", []byte{})
-				Expect(err).To(BeNil())
-			})
+		Specify("Bandwidth Test: Appending to a large file", func() {
+			userlib.DebugMsg("BANDWIDTH #2: Appending to a large file: Initializing user Alice.")
+			alice, err := client.InitUser("alice", defaultPassword)
+			Expect(err).To(BeNil())
 
-			userlib.DebugMsg("Bandwidth for 1 byte append: %d", bandwidth1Byte)
-			userlib.DebugMsg("Bandwidth for 0 bytes append: %d", bandwidth0Bytes)
+			// Create and store a large file
+			largeContent := make([]byte, 1024*1024) // 1MB of data
+			err = alice.StoreFile("largeFile.txt", largeContent)
+			Expect(err).To(BeNil())
+
+			// Get the current state of Datastore
+			db1 := userlib.DatastoreGetMap()
+			var keys1 []userlib.UUID
+			for key := range db1 {
+				keys1 = append(keys1, key)
+			}
+
+			// Append new content
+			newContent := []byte("Appending this content.")
+			err = alice.AppendToFile("largeFile.txt", newContent)
+			Expect(err).To(BeNil())
+
+			// Get the state of Datastore after appending
+			db2 := userlib.DatastoreGetMap()
+			var keys2 []userlib.UUID
+			for key := range db2 {
+				keys2 = append(keys2, key)
+			}
+
+			// Calculate bandwidth used
+			var bandwidthUsed int
+			for _, key := range keys2 {
+				if !contains(keys1, key) {
+					bandwidthUsed += len(db2[key])
+				}
+			}
+
+			userlib.DebugMsg("Bandwidth used: %d bytes", bandwidthUsed)
+			Expect(bandwidthUsed).To(BeNumerically("~", len(newContent), 256)) // Bandwidth should be approximately the size of new content plus some small constant
 		})
 
 		Specify("CreateInvitation: Testing unitialized filename returns error", func() {
