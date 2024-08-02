@@ -743,14 +743,19 @@ func (userdata *User) CreateInvitation(filename string, recipientUsername string
 func (userdata *User) AcceptInvitation(senderUsername string, invitationPtr uuid.UUID, filename string) error {
 	// Check if the recipient already has a file with the chosen filename
 	accessUUID, err := GetAccessUUID(*userdata, filename)
-	if err == nil {
+	if err != nil {
+		return errors.New("could not get access uuid")
+	}
+
+	_, ok := userlib.DatastoreGet(accessUUID)
+	if ok {
 		return errors.New("recipient already has a file with the chosen filename")
 	}
 
 	// get invite metadata
 	inviteMetaData, ok := userlib.DatastoreGet(invitationPtr)
 	if !ok {
-		return errors.New("invalid or missing invitation UUID")
+		return errors.New("no invitation meta")
 	}
 
 	// Unpack the invitation data
@@ -801,7 +806,7 @@ func (userdata *User) AcceptInvitation(senderUsername string, invitationPtr uuid
 
 	// create an access struct
 
-	accessFile := Access{
+	accessStruct := Access{
 		InvitationUUID:      inviteUUID,
 		InvitationSourcekey: inviteSourceKey,
 	}
@@ -818,7 +823,7 @@ func (userdata *User) AcceptInvitation(senderUsername string, invitationPtr uuid
 		return err
 	}
 	// Encrypt the access and create an HMAC tag
-	accessMsg, accessTag, err := EncryptThenMac(accessFile, accessEncKey, accessHMACKey)
+	accessMsg, accessTag, err := EncryptThenMac(accessStruct, accessEncKey, accessHMACKey)
 	if err != nil {
 		return errors.New("failed to package data for entry into DataStore")
 	}

@@ -830,7 +830,7 @@ var _ = Describe("Client Tests", func() {
 
 			invite, err := alice.CreateInvitation(aliceFile, "bob")
 			Expect(err).To(BeNil())
-
+			//
 			err = bob.AcceptInvitation("alice", invite, bobFile)
 			Expect(err).To(BeNil())
 
