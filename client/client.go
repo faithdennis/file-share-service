@@ -1,22 +1,5 @@
 package client
 
-/** OH QUESTION:
-what could be an alternate to storing source keys and calculating keys with deterministic salts?
-can uuids only store marshal-ed data? **/
-// CS 161 Project 2
-
-// Only the following imports are allowed! ANY additional imports
-// may break the autograder!
-// - bytes
-// - encoding/hex
-// - encoding/json
-// - errors
-// - fmt
-// - github.com/cs161-staff/project2-userlib
-// - github.com/google/uuid
-// - strconv
-// - strings
-
 import (
 	"encoding/json"
 
@@ -37,76 +20,6 @@ import (
 	// Optional.
 	_ "strconv"
 )
-
-// This serves two purposes: it shows you a few useful primitives,
-// and suppresses warnings for imports not being used. It can be
-// safely deleted!
-func someUsefulThings() {
-
-	// Creates a random UUID.
-	randomUUID := uuid.New()
-
-	// Prints the UUID as a string. %v prints the value in a default format.
-	// See https://pkg.go.dev/fmt#hdr-Printing for all Golang format string flags.
-	userlib.DebugMsg("Random UUID: %v", randomUUID.String())
-
-	// Creates a UUID deterministically, from a sequence of bytes.
-	hash := userlib.Hash([]byte("user-structs/alice"))
-	deterministicUUID, err := uuid.FromBytes(hash[:16])
-	if err != nil {
-		// Normally, we would `return err` here. But, since this function doesn't return anything,
-		// we can just panic to terminate execution. ALWAYS, ALWAYS, ALWAYS check for errors! Your
-		// code should have hundreds of "if err != nil { return err }" statements by the end of this
-		// project. You probably want to avoid using panic statements in your own code.
-		panic(errors.New("An error occurred while generating a UUID: " + err.Error()))
-	}
-	userlib.DebugMsg("Deterministic UUID: %v", deterministicUUID.String())
-
-	// Declares a Course struct type, creates an instance of it, and marshals it into JSON.
-	type Course struct {
-		name      string
-		professor []byte
-	}
-
-	course := Course{"CS 161", []byte("Nicholas Weaver")}
-	courseBytes, err := json.Marshal(course)
-	if err != nil {
-		panic(err)
-	}
-
-	userlib.DebugMsg("Struct: %v", course)
-	userlib.DebugMsg("JSON Data: %v", courseBytes)
-
-	// Generate a random private/public keypair.
-	// The "_" indicates that we don't check for the error case here.
-	var pk userlib.PKEEncKey
-	var sk userlib.PKEDecKey
-	pk, sk, _ = userlib.PKEKeyGen()
-	userlib.DebugMsg("PKE Key Pair: (%v, %v)", pk, sk)
-
-	// Here's an example of how to use HBKDF to generate a new key from an input key.
-	// Tip: generate a new key everywhere you possibly can! It's easier to generate new keys on the fly
-	// instead of trying to think about all of the ways a key reuse attack could be performed. It's also easier to
-	// store one key and derive multiple keys from that one key, rather than
-	originalKey := userlib.RandomBytes(16)
-	derivedKey, err := userlib.HashKDF(originalKey, []byte("mac-key"))
-	if err != nil {
-		panic(err)
-	}
-	userlib.DebugMsg("Original Key: %v", originalKey)
-	userlib.DebugMsg("Derived Key: %v", derivedKey)
-
-	// A couple of tips on converting between string and []byte:
-	// To convert from string to []byte, use []byte("some-string-here")
-	// To convert from []byte to string for debugging, use fmt.Sprintf("hello world: %s", some_byte_arr).
-	// To convert from []byte to string for use in a hashmap, use hex.EncodeToString(some_byte_arr).
-	// When frequently converting between []byte and string, just marshal and unmarshal the data.
-	//
-	// Read more: https://go.dev/blog/strings
-
-	// Here's an example of string interpolation!
-	_ = fmt.Sprintf("%s_%d", "file", 1)
-}
 
 // This is the type definition for the User struct.
 // A Go struct is like a Python or Java class - it can have attributes
@@ -133,12 +46,6 @@ type Access struct {
 	IsOwner             bool
 }
 
-/**
-type Access struct {
-	InvitationUUID      userlib.UUID
-	InvitationSourcekey []byte // used to generate invitation keys
-} **/
-
 type InvitationList struct {
 	Invitations map[userlib.UUID][]byte // invitation UUID to sourcekey
 }
@@ -164,10 +71,13 @@ type File struct {
 	Next     userlib.UUID
 }
 
-// NOTE: The following methods have toy (insecure!) implementations.
-
 func InitUser(username string, password string) (userdataptr *User, err error) {
-
+	/* 
+ 	Creates a user for the service.
+  	Requires a valid unused username. 
+  	Returns a pointer to the generated user object and an error if applicable. 
+	*/
+	
 	// error check: check if username is an empty string
 	if username == "" {
 		return nil, errors.New("username cannot be empty")
@@ -227,7 +137,12 @@ func InitUser(username string, password string) (userdataptr *User, err error) {
 }
 
 func GetUser(username string, password string) (userdataptr *User, err error) {
-
+	/* 
+ 	Autheticates user information and retrieves a pointer to the user object.
+  	Requires information provided to match an existing user. 
+  	Returns a pointer to the generated user object and an error if applicable. 
+	*/
+	
 	// error check: empty username
 	if username == "" {
 		return nil, errors.New("username cannot be empty")
@@ -281,6 +196,7 @@ func GetUser(username string, password string) (userdataptr *User, err error) {
 }
 
 func (userdata *User) StoreFile(filename string, content []byte) (err error) {
+	
 	// Get accessUUID and keys
 	accessUUID, err := GetAccessUUID(*userdata, filename)
 	if err != nil {
